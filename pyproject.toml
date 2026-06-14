@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "midas"
+name = "midas-agent"
 version = "0.0.1"
 description = "MIDAS — autonomous revenue operator: the business agent you can trust (receipts + budget fuse + sentinel)."
 readme = "README.md"

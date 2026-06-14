@@ -34,6 +34,12 @@ from midas.core.web import (
     StaticSearchAdapter,
 )
 from midas.flagship.market import CompetitorStore
+from midas.flagship.provider_settings import (
+    DashboardSettings,
+    KeyringSecretVault,
+    ProviderManager,
+    SettingsStore,
+)
 
 
 def _load_or_create_file_signer(state: Path) -> Signer:
@@ -63,6 +69,8 @@ class Runtime:
     verifier: SourceVerifier
     competitors: CompetitorStore
     context: SafeContextCompressor
+    providers: ProviderManager
+    settings_store: SettingsStore
 
     @property
     def has_providers(self) -> bool:
@@ -108,6 +116,9 @@ class Runtime:
             ledger=self.ledger,
             memory=self.memory,
             competitors=self.competitors,
+            providers=self.providers,
+            settings_store=self.settings_store,
+            router=self.router,
         )
 
 
@@ -115,6 +126,8 @@ def build_runtime(base_dir: str | Path) -> Runtime:
     base = Path(base_dir)
     state = _state_dir(base)
     config = load_app_config(base)
+    providers = ProviderManager(config.providers, KeyringSecretVault())
+    providers.apply_to_environment()
 
     per_task, daily, monthly = config.caps()
     fuse = BudgetFuse(
@@ -134,6 +147,10 @@ def build_runtime(base_dir: str | Path) -> Runtime:
     verifier = SourceVerifier(fetcher, require_support=True)
     competitors = CompetitorStore(state / "competitors.db")
     context = SafeContextCompressor(ContextBudget.for_mode(_run_mode()))
+    settings_store = SettingsStore(
+        state / "dashboard-settings.json",
+        DashboardSettings.from_config(config),
+    )
 
     return Runtime(
         base_dir=base,
@@ -151,6 +168,8 @@ def build_runtime(base_dir: str | Path) -> Runtime:
         verifier=verifier,
         competitors=competitors,
         context=context,
+        providers=providers,
+        settings_store=settings_store,
     )
 
 

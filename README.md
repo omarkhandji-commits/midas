@@ -1,5 +1,7 @@
 # MIDAS
 
+<img src="docs/assets/midas-mark.svg" alt="MIDAS mark" width="96" />
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-success.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](docs/ROADMAP.md)
@@ -67,6 +69,9 @@ Open the local console:
 .venv\Scripts\midas dashboard
 ```
 
+Package note: the PyPI distribution name is `midas-agent` because `midas` is already
+taken. The CLI command remains `midas`. See [docs/NAMING.md](docs/NAMING.md).
+
 Configure providers:
 
 ```bash
@@ -103,8 +108,9 @@ MIDAS is provider-agnostic. The example config supports:
   Mistral, Groq, Together, OpenRouter, DeepSeek, Cohere, Perplexity, xAI,
   Cerebras, Fireworks, Replicate, Hugging Face.
 
-Secrets stay in `.env` or environment variables. `providers.yml` stores only provider
-metadata and model ids.
+Secrets stay in the OS keychain, `.env`, or environment variables. The dashboard
+Providers screen can store keys in the keychain and test readiness without echoing keys
+back to the browser. `providers.yml` stores only provider metadata and model ids.
 
 ## Safety Model
 

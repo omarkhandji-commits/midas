@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">MIDAS mark</title>
+  <desc id="desc">A proof ledger inspired M mark with a verification rail.</desc>
+  <rect width="512" height="512" fill="#0b0a09"/>
+  <path d="M92 392V120h58l106 152 106-152h58v272h-62V221L274 342h-36l-84-121v171H92Z" fill="#f8f6ef"/>
+  <path d="M94 420h324" stroke="#477555" stroke-width="18" stroke-linecap="square"/>
+  <path d="M388 86h44v44h-44zM388 162h44v44h-44zM388 238h44v44h-44z" fill="#477555"/>
+  <path d="M80 76h352" stroke="#9b5a3e" stroke-width="14" stroke-linecap="square"/>
+</svg>

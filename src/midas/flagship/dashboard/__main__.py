@@ -17,9 +17,16 @@ from pathlib import Path
 import uvicorn
 
 from midas.core.approvals import ApprovalQueue
+from midas.core.config.models import ProviderEntry, ProvidersConfig
 from midas.core.memory import MemoryStore
 from midas.core.receipts import ReceiptLedger, Signer
 from midas.core.receipts.models import Decision
+from midas.flagship.provider_settings import (
+    DashboardSettings,
+    MemorySecretVault,
+    ProviderManager,
+    SettingsStore,
+)
 
 from .app import DashboardDeps, create_app
 from .auth import LoginToken, SessionConfig, Sessions, generate_secret_key
@@ -35,6 +42,11 @@ def build_demo_deps() -> DashboardDeps:
     queue = ApprovalQueue(base / "apv.db")
     ledger = ReceiptLedger(base / "receipts.jsonl", Signer.from_hex_seed("ee" * 32))
     memory = MemoryStore(base / "memory.db")
+    providers_config = ProvidersConfig(
+        providers={"ollama": ProviderEntry(base_url_env="OLLAMA_BASE_URL")}
+    )
+    provider_manager = ProviderManager(providers_config, MemorySecretVault())
+    settings_store = SettingsStore(base / "dashboard-settings.json", DashboardSettings())
 
     # A handful of receipts so the cost meter has something to add up.
     for c in (0.0012, 0.0034, 0.0009, 0.0021):
@@ -63,6 +75,8 @@ def build_demo_deps() -> DashboardDeps:
         queue=queue,
         ledger=ledger,
         memory=memory,
+        providers=provider_manager,
+        settings_store=settings_store,
         sessions=Sessions(SessionConfig(owner_id="owner", secret_key=generate_secret_key())),
         login_token=token,
         allowed_hosts={f"{_HOST}:{_PORT}", "localhost:" + str(_PORT)},

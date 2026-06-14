@@ -69,6 +69,12 @@ export function AppShell() {
     <div className="grid h-full grid-cols-[260px_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)]">
       <header className="col-span-2 sticky top-0 z-10 flex items-baseline justify-between gap-6 border-b border-rule bg-paper px-8 py-3">
         <div className="flex items-baseline gap-3">
+          <img
+            src="/static/app/midas-mark.svg"
+            alt=""
+            className="size-7 self-center"
+            aria-hidden="true"
+          />
           <span className="font-display text-[22px] font-medium tracking-[0.02em]">MIDAS</span>
           <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-mute">
             operator

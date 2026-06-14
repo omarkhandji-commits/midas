@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from midas.core.approvals import ApprovalError, ApprovalQueue
+from midas.core.receipts.models import Decision
 from midas.flagship.outcomes import Outcome, ingest_outcome
 
 from .auth import LoginToken, Sessions
@@ -71,6 +72,9 @@ class DashboardDeps:
     ledger: Any = None  # ReceiptLedger for the cost meter (optional)
     memory: Any = None  # MemoryStore — required for /outcomes; optional otherwise
     competitors: Any = None  # CompetitorStore for Market Radar APIs
+    providers: Any = None  # ProviderManager for keychain-backed provider setup
+    settings_store: Any = None  # SettingsStore for local dashboard settings
+    router: Any = None  # LLMRouter for optional live provider tests
     sse_interval_seconds: float = 1.5  # tests can shorten via deps; UI default is 1.5s
 
 
@@ -256,6 +260,114 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
 
         return _json(200, {"asset_types": list(ASSET_KEYS)})
 
+    @app.get("/api/providers")
+    def api_providers(request: Request) -> Response:
+        _require_session(request)
+        if deps.providers is None:
+            return _json(503, {"error": "providers disabled"})
+        return _json(200, {"providers": deps.providers.list_statuses()})
+
+    @app.post("/api/providers")
+    async def api_provider_add(request: Request) -> Response:
+        _require_session(request)
+        if deps.providers is None:
+            return _json(503, {"error": "providers disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            provider = str(body.get("provider") or "")
+            api_key = _optional_secret(body.get("api_key"))
+            base_url = _optional_secret(body.get("base_url"))
+            status_json = deps.providers.add(provider, api_key=api_key, base_url=base_url)
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="providers.add",
+            inputs={
+                "provider": status_json["name"],
+                "api_key_supplied": bool(api_key),
+                "base_url_supplied": bool(base_url),
+            },
+            outputs={
+                "configured": status_json["configured"],
+                "missing": status_json["missing"],
+            },
+        )
+        return _json(200, {"ok": True, "provider": status_json})
+
+    @app.post("/api/providers/test")
+    async def api_provider_test(request: Request) -> Response:
+        _require_session(request)
+        if deps.providers is None:
+            return _json(503, {"error": "providers disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            result = deps.providers.test(
+                str(body.get("provider") or ""),
+                live=bool(body.get("live") or False),
+                model=str(body["model"]) if body.get("model") else None,
+                router=deps.router,
+            )
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="providers.test",
+            inputs={"provider": result.provider, "live": result.live, "model": result.model},
+            outputs={"ok": result.ok, "message_len": len(result.message)},
+            decision=Decision.ALLOW if result.ok else Decision.DENY,
+            cost_usd=result.cost_usd,
+        )
+        return _json(200, result.to_json())
+
+    @app.delete("/api/providers/{provider}")
+    def api_provider_remove(request: Request, provider: str) -> Response:
+        _require_session(request)
+        if deps.providers is None:
+            return _json(503, {"error": "providers disabled"})
+        try:
+            status_json = deps.providers.remove(provider)
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="providers.remove",
+            inputs={"provider": status_json["name"]},
+            outputs={"configured": status_json["configured"]},
+        )
+        return _json(200, {"ok": True, "provider": status_json})
+
+    @app.get("/api/settings")
+    def api_settings_get(request: Request) -> Response:
+        _require_session(request)
+        if deps.settings_store is None:
+            return _json(503, {"error": "settings disabled"})
+        return _json(200, {"settings": deps.settings_store.get().to_json()})
+
+    @app.post("/api/settings")
+    async def api_settings_post(request: Request) -> Response:
+        _require_session(request)
+        if deps.settings_store is None:
+            return _json(503, {"error": "settings disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            settings_json = deps.settings_store.update(body).to_json()
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="settings.update",
+            inputs={"fields": sorted(body.keys())},
+            outputs=settings_json,
+        )
+        return _json(200, {"ok": True, "settings": settings_json})
+
     @app.get("/events")
     async def events(request: Request) -> Any:
         # Owner-gated SSE. The stream is no-cache and Content-Type text/event-stream,
@@ -375,6 +487,35 @@ def _memory_json(row: Any) -> dict[str, Any]:
         "sources": row.sources,
         "tags": row.tags,
     }
+
+
+def _optional_secret(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _receipt(
+    deps: DashboardDeps,
+    *,
+    tool: str,
+    inputs: dict[str, Any],
+    outputs: dict[str, Any],
+    decision: Decision = Decision.ALLOW,
+    cost_usd: float = 0.0,
+) -> None:
+    if deps.ledger is None:
+        return
+    deps.ledger.append(
+        run_id="dashboard",
+        agent="dashboard",
+        tool=tool,
+        decision=decision,
+        inputs=inputs,
+        outputs=outputs,
+        cost_usd=cost_usd,
+    )
 
 
 def _json(code: int, body: dict) -> Response:
