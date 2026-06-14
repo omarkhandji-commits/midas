@@ -1,0 +1,43 @@
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { AppShell } from "@/components/AppShell";
+import { ChatPage } from "@/pages/Chat";
+import { MissionsPage } from "@/pages/Missions";
+import { AssetsPage } from "@/pages/Assets";
+import { ApprovalsPage } from "@/pages/Approvals";
+import { ProofsPage } from "@/pages/Proofs";
+import { MemoryPage } from "@/pages/Memory";
+import { OutcomesPage } from "@/pages/Outcomes";
+import { ChannelsPage } from "@/pages/Channels";
+import { ProvidersPage } from "@/pages/Providers";
+import { MarketPage } from "@/pages/Market";
+import { SchedulePage } from "@/pages/Schedule";
+import { SkillsPage } from "@/pages/Skills";
+import { SettingsPage } from "@/pages/Settings";
+
+// FastAPI serves the SPA from / after a successful login (the legacy Jinja /login
+// page still owns the token form). React Router handles every in-app route.
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <AppShell />,
+    children: [
+      { index: true, element: <ChatPage /> },
+      { path: "missions", element: <MissionsPage /> },
+      { path: "assets", element: <AssetsPage /> },
+      { path: "approvals", element: <ApprovalsPage /> },
+      { path: "proofs", element: <ProofsPage /> },
+      { path: "memory", element: <MemoryPage /> },
+      { path: "outcomes", element: <OutcomesPage /> },
+      { path: "channels", element: <ChannelsPage /> },
+      { path: "providers", element: <ProvidersPage /> },
+      { path: "market", element: <MarketPage /> },
+      { path: "schedule", element: <SchedulePage /> },
+      { path: "skills", element: <SkillsPage /> },
+      { path: "settings", element: <SettingsPage /> },
+    ],
+  },
+]);
+
+export function App() {
+  return <RouterProvider router={router} />;
+}

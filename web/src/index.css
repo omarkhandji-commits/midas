@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * MIDAS theme tokens (HSL components so Tailwind's color-mix works cleanly).
+ * Light is the default. Dark flips via prefers-color-scheme OR .dark class.
+ * Palette intentionally restrained — Proof-First green is the only accent.
+ */
+@layer base {
+  :root {
+    --ink:        0 4% 4%;
+    --paper:      48 22% 98%;
+    --rule:       42 11% 83%;
+    --rule-soft:  44 19% 89%;
+    --mute:       42 4% 40%;
+    --accent:     145 30% 23%;
+    --accent-hi:  144 28% 28%;
+    --warn:       16 64% 28%;
+    --warn-hi:    16 67% 35%;
+    --ok-bg:      136 14% 92%;
+    --warn-bg:    24 24% 92%;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink:        47 17% 92%;
+      --paper:      220 9% 6%;
+      --rule:       225 4% 17%;
+      --rule-soft:  228 5% 11%;
+      --mute:       45 4% 51%;
+      --accent:     142 30% 60%;
+      --accent-hi:  142 38% 68%;
+      --warn:       24 56% 60%;
+      --warn-hi:    24 60% 68%;
+      --ok-bg:      144 22% 11%;
+      --warn-bg:    24 34% 11%;
+    }
+  }
+
+  .dark {
+    --ink:        47 17% 92%;
+    --paper:      220 9% 6%;
+    --rule:       225 4% 17%;
+    --rule-soft:  228 5% 11%;
+    --mute:       45 4% 51%;
+    --accent:     142 30% 60%;
+    --accent-hi:  142 38% 68%;
+    --warn:       24 56% 60%;
+    --warn-hi:    24 60% 68%;
+    --ok-bg:      144 22% 11%;
+    --warn-bg:    24 34% 11%;
+  }
+
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-paper text-ink font-ui antialiased;
+    font-size: 15px;
+    line-height: 1.5;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Tabular numerics everywhere a number lives. */
+  time, code, .tabular { font-variant-numeric: tabular-nums; }
+
+  /* Pro-grade focus ring. Not a generic blue blob. */
+  :focus-visible { outline: 2px solid hsl(var(--accent)); outline-offset: 2px; }
+}
+
+/*
+ * Premium font self-hosting hook. The .woff2 files live under
+ * /static/app/assets/fonts/ (added in a follow-up commit). When absent, the UI
+ * gracefully falls back to ui-sans-serif / ui-monospace — still polished.
+ */
+@layer base {
+  @font-face {
+    font-family: "Geist";
+    font-display: swap;
+    font-weight: 400 700;
+    src: local("Geist"), url("./assets/fonts/Geist-Variable.woff2") format("woff2-variations");
+  }
+  @font-face {
+    font-family: "Geist Mono";
+    font-display: swap;
+    font-weight: 400 700;
+    src: local("Geist Mono"), url("./assets/fonts/GeistMono-Variable.woff2") format("woff2-variations");
+  }
+}

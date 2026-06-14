@@ -20,6 +20,8 @@ audit/*.jsonl
 # Standard
 node_modules/
 __pycache__/
+# Built SPA assets — produced by `npm run build` in web/, shipped only in the wheel.
+src/midas/flagship/dashboard/static/app/
 .venv/
 venv/
 dist/

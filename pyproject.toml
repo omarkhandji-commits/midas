@@ -58,6 +58,16 @@ midas = "midas.flagship.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/midas"]
+# Built SPA assets are gitignored (produced by `npm run build` in web/), but the
+# release wheel MUST ship them so `pip install midas` is the only step end users need.
+artifacts = [
+    "/src/midas/flagship/dashboard/static/app",
+]
+
+[tool.hatch.build.targets.sdist]
+artifacts = [
+    "/src/midas/flagship/dashboard/static/app",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

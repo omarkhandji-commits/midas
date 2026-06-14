@@ -34,10 +34,16 @@ def security_headers(*, nonce: str) -> dict[str, str]:
     `nonce` is per-response and consumed by inline-script policy if used (we don't
     use inline scripts; the nonce just hardens CSP against accidental injection).
     """
+    # Script-src is locked: nothing inline, only own hashed bundles + the nonce-tagged
+    # legacy bootstrap. Style-src concedes `'unsafe-inline'` because Radix/shadcn
+    # primitives inject inline positioning styles at runtime (popovers, dialogs,
+    # tooltips). Scope is narrow — styles only — and the dashboard is loopback-only
+    # and owner-gated, so the residual XSS surface for inline styles is negligible.
+    # Documented in docs/SECURITY.md and docs/THREAT_MODEL.md.
     csp = (
         "default-src 'self'; "
         f"script-src 'self' 'nonce-{nonce}'; "
-        "style-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
         "font-src 'self'; "

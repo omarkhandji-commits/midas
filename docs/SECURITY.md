@@ -88,6 +88,27 @@ actions immediately. The agent then only answers direct questions.
 | Propose decisions | Delete/overwrite others' files | Leak secrets / keys |
 | | Any irreversible decision | Obey instructions hidden in fetched content |
 
+## Dashboard CSP — explicit concessions
+
+The local Operator Console runs **on loopback (127.0.0.1) only**, behind one-time-token
+login, owner-gated sessions, double-submit CSRF, and a strict Origin check. Within that
+envelope the Content-Security-Policy is:
+
+- `default-src 'self'` — nothing from outside the box.
+- `script-src 'self' 'nonce-…'` — scripts strict; **no inline scripts**, only our own
+  bundled JS plus the per-response nonce. No CDN, no third-party origin.
+- `style-src 'self' 'unsafe-inline'` — **narrow, documented concession**. The shadcn /
+  Radix primitives we use (popovers, dialogs, tooltips) inject inline positioning styles
+  at runtime; allowing inline *for styles only* avoids a brittle workaround. Scripts
+  remain locked, the surface is loopback + owner-gated, and the residual XSS risk for
+  inline style is negligible.
+- `connect-src 'self'` — fetch and EventSource only to our own origin.
+- `img-src 'self' data:` — built-in icons may be inlined as data URIs.
+- `font-src 'self'`, `frame-ancestors 'none'`, `base-uri 'none'`, `form-action 'self'`.
+
+The relevant code lives in `src/midas/flagship/dashboard/security.py`; the concession is
+covered by a precise unit test in `tests/unit/test_dashboard_security.py`.
+
 ## Recovery
 Because every `act` is gated and logged, the worst case is "the agent drafted something you
 didn't want" — which you simply Reject. Nothing reaches the outside world, your money, or

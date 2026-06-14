@@ -40,6 +40,20 @@ from .security import (
 _HERE = Path(__file__).resolve().parent
 _TEMPLATES = _HERE / "templates"
 _STATIC = _HERE / "static"
+_SPA_INDEX = _STATIC / "app" / "index.html"
+
+# Paths that must NEVER be swallowed by the SPA catch-all (kept here to make the
+# allow-list explicit and reviewable). Includes FastAPI's auto-disabled doc paths
+# so /docs, /redoc, /openapi.json keep their 404 (no fingerprinting surface).
+_NON_SPA_PREFIXES: tuple[str, ...] = (
+    "api/", "static/", "events", "login", "snapshot", "outcomes",
+    "approvals/", "dashboard", "docs", "redoc", "openapi.json",
+)
+
+
+def _spa_available() -> bool:
+    """The built SPA exists on disk. Lets us fall back to Jinja during tests/CI."""
+    return _SPA_INDEX.is_file()
 
 SESSION_COOKIE = "midas_session"
 CSRF_COOKIE = "midas_csrf"
@@ -126,6 +140,10 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request) -> Any:
         _require_session(request)
+        # Prefer the React SPA when it is built into static/app/. The Jinja shell is
+        # still shipped as a graceful fallback for tests/CI environments without Node.
+        if _spa_available():
+            return HTMLResponse(_SPA_INDEX.read_text(encoding="utf-8"))
         pending = deps.queue.pending()
         receipts = list(deps.ledger) if deps.ledger is not None else []
         spent = round(sum(r.body.cost_usd for r in receipts), 6)
@@ -303,6 +321,15 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
     @app.post("/api/outcomes")
     async def api_outcomes(request: Request) -> Response:
         return await outcomes(request)
+
+    # SPA catch-all — must stay LAST so every concrete route above wins first. Serves
+    # the React shell for any client-side route React Router owns. Session-required.
+    @app.get("/{spa_path:path}", response_class=HTMLResponse, include_in_schema=False)
+    def spa_catchall(request: Request, spa_path: str) -> Any:
+        if spa_path.startswith(_NON_SPA_PREFIXES) or not _spa_available():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        _require_session(request)
+        return HTMLResponse(_SPA_INDEX.read_text(encoding="utf-8"))
 
     return app
 

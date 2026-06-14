@@ -26,9 +26,15 @@ from midas.flagship.dashboard.app import CSRF_COOKIE, SESSION_COOKIE
 # ── pure-logic helpers ───────────────────────────────────────────────────────
 def test_security_headers_are_strict() -> None:
     h = security_headers(nonce="abc")
-    assert "default-src 'self'" in h["Content-Security-Policy"]
-    assert "'unsafe-inline'" not in h["Content-Security-Policy"]  # no inline scripts
-    assert "frame-ancestors 'none'" in h["Content-Security-Policy"]
+    csp = h["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    # Script-src must stay locked: no inline scripts, only own bundles + nonce.
+    script_src = _csp_directive(csp, "script-src")
+    assert "'unsafe-inline'" not in script_src
+    assert "'nonce-" in script_src
+    # Style-src concedes 'unsafe-inline' for Radix/shadcn positioning — documented.
+    assert "'unsafe-inline'" in _csp_directive(csp, "style-src")
+    assert "frame-ancestors 'none'" in csp
     assert h["X-Frame-Options"] == "DENY"
     assert h["X-Content-Type-Options"] == "nosniff"
     assert h["Referrer-Policy"] == "no-referrer"
@@ -97,8 +103,21 @@ def test_security_headers_on_response(tmp_path: Path) -> None:
     r = client.get("/login")
     assert r.status_code == 200
     assert r.headers["X-Frame-Options"] == "DENY"
-    assert "default-src 'self'" in r.headers["Content-Security-Policy"]
-    assert "'unsafe-inline'" not in r.headers["Content-Security-Policy"]
+    csp = r.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    # Scripts stay strict — no inline, only own bundles + nonce.
+    assert "'unsafe-inline'" not in _csp_directive(csp, "script-src")
+    assert "'nonce-" in _csp_directive(csp, "script-src")
+    # Styles allow inline (Radix popover positioning) — narrow, documented concession.
+    assert "'unsafe-inline'" in _csp_directive(csp, "style-src")
+
+
+def _csp_directive(csp: str, name: str) -> str:
+    for chunk in csp.split(";"):
+        chunk = chunk.strip()
+        if chunk.startswith(name + " "):
+            return chunk
+    return ""
 
 
 def test_login_with_wrong_token_rejected(tmp_path: Path) -> None:
