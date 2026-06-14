@@ -23,6 +23,7 @@ from midas.core.receipts import ReceiptLedger, Signer
 from midas.core.receipts.models import Decision
 from midas.core.router import ChatResult, LLMRouter
 from midas.core.sentinel import Sentinel
+from midas.flagship.channel_settings import ChannelManager
 from midas.flagship.provider_settings import (
     DashboardSettings,
     MemorySecretVault,
@@ -49,6 +50,7 @@ def build_demo_deps() -> DashboardDeps:
         providers={"ollama": ProviderEntry(base_url_env="OLLAMA_BASE_URL")}
     )
     provider_manager = ProviderManager(providers_config, MemorySecretVault())
+    channel_manager = ChannelManager(MemorySecretVault())
     settings_store = SettingsStore(base / "dashboard-settings.json", DashboardSettings())
     router = LLMRouter(
         providers_config,
@@ -95,6 +97,7 @@ def build_demo_deps() -> DashboardDeps:
         memory=memory,
         providers=provider_manager,
         settings_store=settings_store,
+        channels=channel_manager,
         router=router,
         sentinel=Sentinel(PolicyConfig()),
         sessions=Sessions(SessionConfig(owner_id="owner", secret_key=generate_secret_key())),

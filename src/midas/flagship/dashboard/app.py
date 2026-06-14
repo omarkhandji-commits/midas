@@ -83,6 +83,7 @@ class DashboardDeps:
     sentinel: Any = None  # Sentinel gate for chat-proposed approval cards
     search: Any = None  # SearchAdapter for live missions
     verifier: Any = None  # SourceVerifier for live missions
+    channels: Any = None  # ChannelManager for owner-gated channel setup
     chat_est_usd: float = 0.02
     sse_interval_seconds: float = 1.5  # tests can shorten via deps; UI default is 1.5s
 
@@ -370,6 +371,70 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
             outputs={"asset_count": len(asset_json), "pdf_count": len(pdfs)},
         )
         return _json(200, {"ok": True, "assets": asset_json, "pdfs": pdfs})
+
+    @app.get("/api/channels")
+    def api_channels(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        return _json(200, {"channels": deps.channels.list_statuses()})
+
+    @app.post("/api/channels/telegram")
+    async def api_channels_telegram_connect(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            bot_token = str(body.get("bot_token") or "")
+            owner_chat_id = str(body.get("owner_chat_id") or "")
+            status_json = deps.channels.connect_telegram(
+                bot_token=bot_token,
+                owner_chat_id=owner_chat_id,
+            ).to_json()
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="channels.telegram.connect",
+            inputs={
+                "token_supplied": bool(bot_token.strip()),
+                "owner_supplied": bool(owner_chat_id.strip()),
+            },
+            outputs={"connected": status_json["connected"], "missing": status_json["missing"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
+    @app.post("/api/channels/telegram/test")
+    def api_channels_telegram_test(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        result = deps.channels.test_telegram()
+        _receipt(
+            deps,
+            tool="channels.telegram.test",
+            inputs={"channel": "telegram"},
+            outputs={"ok": result["ok"], "missing": result["missing"]},
+            decision=Decision.ALLOW if result["ok"] else Decision.DENY,
+        )
+        return _json(200, result)
+
+    @app.delete("/api/channels/telegram")
+    def api_channels_telegram_remove(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        status_json = deps.channels.remove_telegram().to_json()
+        _receipt(
+            deps,
+            tool="channels.telegram.remove",
+            inputs={"channel": "telegram"},
+            outputs={"connected": status_json["connected"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
 
     @app.get("/api/providers")
     def api_providers(request: Request) -> Response:

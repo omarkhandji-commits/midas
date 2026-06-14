@@ -33,6 +33,7 @@ from midas.core.web import (
     SourceVerifier,
     StaticSearchAdapter,
 )
+from midas.flagship.channel_settings import ChannelManager
 from midas.flagship.market import CompetitorStore
 from midas.flagship.provider_settings import (
     DashboardSettings,
@@ -71,6 +72,7 @@ class Runtime:
     context: SafeContextCompressor
     providers: ProviderManager
     settings_store: SettingsStore
+    channels: ChannelManager
 
     @property
     def has_providers(self) -> bool:
@@ -122,6 +124,7 @@ class Runtime:
             sentinel=self.sentinel,
             search=self.search,
             verifier=self.verifier,
+            channels=self.channels,
         )
 
 
@@ -131,6 +134,7 @@ def build_runtime(base_dir: str | Path) -> Runtime:
     config = load_app_config(base)
     providers = ProviderManager(config.providers, KeyringSecretVault())
     providers.apply_to_environment()
+    channels = ChannelManager(KeyringSecretVault())
 
     per_task, daily, monthly = config.caps()
     fuse = BudgetFuse(
@@ -173,6 +177,7 @@ def build_runtime(base_dir: str | Path) -> Runtime:
         context=context,
         providers=providers,
         settings_store=settings_store,
+        channels=channels,
     )
 
 

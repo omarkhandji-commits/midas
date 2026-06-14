@@ -103,6 +103,50 @@ def dashboard(
 
 
 @app.command()
+def up(
+    host: str = typer.Option("127.0.0.1", "--host", help="Loopback host only."),
+    port: int = typer.Option(8765, "--port", help="Local dashboard port."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Start dashboard and configured listeners together."""
+    import asyncio
+
+    import uvicorn
+
+    from midas.flagship.channel_settings import TelegramLongPollListener
+    from midas.flagship.dashboard import create_app
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    deps = rt.dashboard_deps(allowed_host=f"{host}:{port}")
+    typer.echo(f"Dashboard login token: {deps.login_token.value}")
+    typer.echo(f"Starting local console at http://{host}:{port}")
+    telegram_config = rt.channels.telegram_config()
+    if telegram_config is None:
+        typer.echo("Telegram listener: not configured")
+    else:
+        typer.echo("Telegram listener: configured")
+
+    async def _serve() -> None:
+        tasks = []
+        if telegram_config is not None:
+            listener = TelegramLongPollListener(config=telegram_config, queue=rt.approvals)
+            tasks.append(asyncio.create_task(listener.run_forever()))
+        server = uvicorn.Server(
+            uvicorn.Config(
+                create_app(deps, bind_host=host),
+                host=host,
+                port=port,
+                log_level="warning",
+            )
+        )
+        tasks.append(asyncio.create_task(server.serve()))
+        await asyncio.gather(*tasks)
+
+    asyncio.run(_serve())
+
+
+@app.command()
 def eval(
     out: str | None = typer.Option(
         None, "--out", "-o", help="Write the Transparency Report to this path."
