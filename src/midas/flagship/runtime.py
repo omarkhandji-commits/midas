@@ -120,6 +120,8 @@ class Runtime:
             settings_store=self.settings_store,
             router=self.router,
             sentinel=self.sentinel,
+            search=self.search,
+            verifier=self.verifier,
         )
 
 

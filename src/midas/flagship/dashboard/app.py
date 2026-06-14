@@ -14,6 +14,7 @@ tests can mount it without starting a server.
 
 from __future__ import annotations
 
+import base64
 import json
 import uuid
 from dataclasses import dataclass
@@ -80,6 +81,8 @@ class DashboardDeps:
     settings_store: Any = None  # SettingsStore for local dashboard settings
     router: Any = None  # LLMRouter for optional live provider tests
     sentinel: Any = None  # Sentinel gate for chat-proposed approval cards
+    search: Any = None  # SearchAdapter for live missions
+    verifier: Any = None  # SourceVerifier for live missions
     chat_est_usd: float = 0.02
     sse_interval_seconds: float = 1.5  # tests can shorten via deps; UI default is 1.5s
 
@@ -205,6 +208,15 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
     def api_proofs(request: Request) -> Response:
         _require_session(request)
         receipts = list(deps.ledger) if deps.ledger is not None else []
+        chain: dict[str, Any] = {"ok": True, "count": len(receipts), "error": None}
+        if deps.ledger is not None:
+            try:
+                from midas.core.receipts import verify_chain
+
+                verified = verify_chain(deps.ledger.path, deps.ledger.public_key_hex)
+                chain = {"ok": verified.ok, "count": verified.count, "error": verified.error}
+            except Exception:
+                chain = {"ok": False, "count": len(receipts), "error": "verify failed"}
         proofs = [
             {
                 "seq": r.body.seq,
@@ -218,7 +230,7 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
             }
             for r in receipts[-100:]
         ]
-        return _json(200, {"proofs": proofs})
+        return _json(200, {"proofs": proofs, "chain": chain})
 
     @app.get("/api/approvals")
     def api_approvals(request: Request) -> Response:
@@ -265,6 +277,99 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         from midas.flagship.assets import ASSET_KEYS
 
         return _json(200, {"asset_types": list(ASSET_KEYS)})
+
+    @app.post("/api/missions")
+    async def api_missions(request: Request) -> Response:
+        _require_session(request)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            niche = str(body.get("niche") or "").strip()
+            live = bool(body.get("live") or False)
+            mode = str(body.get("mode") or "deep")
+            if not niche:
+                return _json(400, {"error": "niche required"})
+            if mode not in {"fast", "deep", "war-room"}:
+                return _json(400, {"error": "invalid mode"})
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+
+        from midas.flagship.flows import run_scan, scan_niche
+        from midas.flagship.flows.demo import demo_candidates
+
+        run_id = f"mission:{uuid.uuid4().hex[:12]}"
+        if live:
+            if deps.router is None:
+                return _json(503, {"error": "router disabled"})
+            report = scan_niche(
+                niche,
+                router=deps.router,
+                search=deps.search,
+                verifier=deps.verifier,
+                ledger=deps.ledger,
+                memory=deps.memory,
+                run_id=run_id,
+                task_id=run_id,
+                est_usd=deps.chat_est_usd,
+            )
+        else:
+            report = run_scan(niche, demo_candidates(), ledger=deps.ledger, memory=deps.memory)
+        approval_id = _queue_move_approval(deps, report, run_id=run_id)
+        _receipt(
+            deps,
+            tool="missions.scan",
+            inputs={"niche": niche, "live": live, "mode": mode},
+            outputs={
+                "daily_move": bool(report.daily_move),
+                "proof_level": report.proof_level.value,
+                "approval_id": approval_id,
+            },
+        )
+        return _json(200, {"ok": True, "mission": _scan_report_json(report, run_id, approval_id)})
+
+    @app.post("/api/assets/generate")
+    async def api_assets_generate(request: Request) -> Response:
+        _require_session(request)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            topic = str(body.get("topic") or "").strip()
+            summary = str(body.get("summary") or topic).strip()
+            live = bool(body.get("live") or False)
+            if not topic:
+                return _json(400, {"error": "topic required"})
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+
+        from midas.flagship.assets import heuristic_assets, llm_assets, simple_pdf_bytes
+
+        candidate = _candidate_from_topic(topic, summary)
+        if live:
+            if deps.router is None:
+                return _json(503, {"error": "router disabled"})
+            assets = llm_assets(candidate, router=deps.router, run_id="assets:generate")
+        else:
+            assets = heuristic_assets(candidate)
+        asset_json = assets.as_dict()
+        pdfs = {
+            key: {
+                "filename": f"{key}.pdf",
+                "media_type": "application/pdf",
+                "base64": base64.b64encode(
+                    simple_pdf_bytes(key.replace("_", " ").title(), asset_json[key])
+                ).decode("ascii"),
+            }
+            for key in ("proposal_pdf", "invoice_pdf")
+        }
+        _receipt(
+            deps,
+            tool="assets.generate",
+            inputs={"topic": topic, "live": live},
+            outputs={"asset_count": len(asset_json), "pdf_count": len(pdfs)},
+        )
+        return _json(200, {"ok": True, "assets": asset_json, "pdfs": pdfs})
 
     @app.get("/api/providers")
     def api_providers(request: Request) -> Response:
@@ -561,6 +666,101 @@ def _memory_json(row: Any) -> dict[str, Any]:
         "sources": row.sources,
         "tags": row.tags,
     }
+
+
+def _queue_move_approval(deps: DashboardDeps, report: Any, *, run_id: str) -> int | None:
+    move = getattr(report, "daily_move", None)
+    if move is None:
+        return None
+    req = deps.queue.enqueue(
+        run_id=run_id,
+        agent="midas",
+        tool="business_asset",
+        action="send_email",
+        summary=f"Approve next action for {move.candidate.name}: {move.next_action}",
+        payload={
+            "candidate": move.candidate.name,
+            "next_action": move.next_action,
+            "asset_keys": sorted(move.brief.draft_assets),
+        },
+    )
+    _receipt(
+        deps,
+        tool="approval.enqueue",
+        inputs={"candidate": move.candidate.name},
+        outputs={"approval_id": req.id},
+        decision=Decision.QUEUE_APPROVAL,
+    )
+    return int(req.id)
+
+
+def _scan_report_json(report: Any, run_id: str, approval_id: int | None) -> dict[str, Any]:
+    move = getattr(report, "daily_move", None)
+    return {
+        "run_id": run_id,
+        "niche": report.niche,
+        "proof_level": report.proof_level.value,
+        "spent_usd": report.spent_usd,
+        "abstained_reason": report.abstained_reason,
+        "approval_id": approval_id,
+        "daily_move": None if move is None else _move_json(move),
+        "shortlist": [_scored_json(item) for item in report.shortlist],
+    }
+
+
+def _move_json(move: Any) -> dict[str, Any]:
+    candidate = move.candidate
+    return {
+        "name": candidate.name,
+        "summary": candidate.summary,
+        "score": round(float(move.breakdown.total), 4),
+        "band": move.breakdown.band.value,
+        "proof_level": move.proof_level.value,
+        "sources": candidate.sources,
+        "findings": [
+            {
+                "claim": finding.claim,
+                "proof_level": finding.proof_level.value,
+                "sources": finding.sources,
+            }
+            for finding in candidate.findings
+        ],
+        "steps": move.brief.steps,
+        "assets": move.brief.draft_assets,
+        "estimate": {
+            "assumptions": move.estimate.assumptions,
+            "est_cost_usd": move.estimate.est_cost_usd,
+            "est_time_hours": move.estimate.est_time_hours,
+            "note": move.estimate.note,
+        },
+        "next_action": move.next_action,
+        "next_action_requires_approval": move.next_action_requires_approval,
+    }
+
+
+def _scored_json(item: Any) -> dict[str, Any]:
+    return {
+        "name": item.candidate.name,
+        "summary": item.candidate.summary,
+        "score": round(float(item.breakdown.total), 4),
+        "band": item.band.value,
+        "proof_level": item.candidate.proof_level.value,
+        "weakest_factor": item.breakdown.weakest_factor,
+        "sources": item.candidate.sources,
+    }
+
+
+def _candidate_from_topic(topic: str, summary: str) -> Any:
+    from midas.core.agents.summary import Finding, ProofLevel
+    from midas.flagship.opportunity import OpportunityCandidate
+    from midas.flagship.scoring import FactorScores
+
+    return OpportunityCandidate(
+        name=topic,
+        summary=summary,
+        findings=[Finding(f"Operator-supplied asset request for {topic}.", ProofLevel.LOW)],
+        factors=FactorScores(**{key: 7 for key in FactorScores.model_fields}),
+    )
 
 
 def _optional_secret(value: Any) -> str | None:
