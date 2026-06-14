@@ -24,7 +24,8 @@ from midas.core.receipts.models import Decision
 from .app import DashboardDeps, create_app
 from .auth import LoginToken, SessionConfig, Sessions, generate_secret_key
 
-_DEMO_TOKEN = "midas-demo-token-for-local-preview-only"
+# Fixed demo login token for the local-only preview console; not a real credential.
+_DEMO_TOKEN = "midas-demo-token-for-local-preview-only"  # nosec B105
 _PORT = int(os.environ.get("MIDAS_DASHBOARD_PORT", "8765"))
 _HOST = "127.0.0.1"
 

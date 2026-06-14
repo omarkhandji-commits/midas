@@ -7,6 +7,7 @@ and writes receipts. No ads API or private scraping is implied.
 
 from __future__ import annotations
 
+import builtins
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -86,7 +87,7 @@ class CompetitorStore:
             ).fetchone()
         return self._row_competitor(row)
 
-    def list(self) -> list[Competitor]:
+    def list(self) -> builtins.list[Competitor]:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id,created_ts,name,url,notes FROM competitors ORDER BY id ASC"
@@ -100,7 +101,7 @@ class CompetitorStore:
         memory: Any = None,
         ledger: Any = None,
         run_id: str = "market-watch",
-    ) -> list[CompetitorSnapshot]:
+    ) -> builtins.list[CompetitorSnapshot]:
         return [
             self.snapshot(c, fetcher=fetcher, memory=memory, ledger=ledger, run_id=run_id)
             for c in self.list()

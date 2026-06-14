@@ -28,4 +28,8 @@ build/
 Thumbs.db
 *.log
 .cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 .shipvitals-evidence/

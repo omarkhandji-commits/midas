@@ -144,11 +144,8 @@ def scan_niche(
     from .discover import discover_candidates
 
     memory_context = ""
-    if memory is not None:
-        try:
-            memory_context = memory.context_pack(query=niche)
-        except AttributeError:
-            memory_context = ""
+    if memory is not None and hasattr(memory, "context_pack"):
+        memory_context = memory.context_pack(query=niche)
 
     candidates = discover_candidates(
         niche,
@@ -177,7 +174,7 @@ def _log_scan_decision(
         return
     rejected = [s.candidate.name for s in shortlist[1:4]]  # top alternates we passed on
     if move is not None:
-        memory.record_decision(  # type: ignore[attr-defined]
+        memory.record_decision(
             f"scan:{niche}",
             chose=move.candidate.name,
             rejected=rejected,
@@ -186,7 +183,7 @@ def _log_scan_decision(
             sources=move.candidate.sources,
         )
     elif hasattr(memory, "remember"):
-        memory.remember(  # type: ignore[attr-defined]
+        memory.remember(
             MemoryKind.DECISION,
             f"scan:{niche}",
             f"abstained: {abstained}",

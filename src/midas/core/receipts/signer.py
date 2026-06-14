@@ -24,7 +24,7 @@ class Signer:
 
     @classmethod
     def from_hex_seed(cls, seed_hex: str) -> Signer:
-        return cls(signing.SigningKey(seed_hex, encoder=encoding.HexEncoder))
+        return cls(signing.SigningKey(seed_hex.encode("ascii"), encoder=encoding.HexEncoder))
 
     @property
     def public_key_hex(self) -> str:
@@ -39,7 +39,7 @@ class Signer:
     @staticmethod
     def verify(public_key_hex: str, message: str, sig_hex: str) -> bool:
         try:
-            vk = signing.VerifyKey(public_key_hex, encoder=encoding.HexEncoder)
+            vk = signing.VerifyKey(public_key_hex.encode("ascii"), encoder=encoding.HexEncoder)
             vk.verify(message.encode("utf-8"), bytes.fromhex(sig_hex))
             return True
         except (BadSignatureError, ValueError):

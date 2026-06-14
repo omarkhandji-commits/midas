@@ -194,10 +194,12 @@ class ApprovalQueue:
         return req
 
     def _select(self, where: str, params: tuple) -> list[ApprovalRequest]:
+        # `where` is always an internal constant clause (see callers: pending()/get());
+        # user-supplied values are bound via `params`, never formatted into the SQL.
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id,created_ts,run_id,agent,tool,action,summary,payload,status,"
-                "resolved_ts,resolver,note FROM approvals " + where,
+                "resolved_ts,resolver,note FROM approvals " + where,  # nosec B608
                 params,
             ).fetchall()
         return [

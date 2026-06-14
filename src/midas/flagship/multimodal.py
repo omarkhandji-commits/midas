@@ -70,7 +70,7 @@ def inspect_media(path: str | Path, *, max_text_chars: int = 20_000) -> MediaIns
 
 def _extract_pdf_text(path: Path, *, max_text_chars: int) -> tuple[str, list[str]]:
     try:
-        from pypdf import PdfReader  # type: ignore
+        from pypdf import PdfReader
     except Exception:
         return "", ["install optional PDF extractor dependency to extract PDF text"]
 
@@ -85,7 +85,7 @@ def _extract_pdf_text(path: Path, *, max_text_chars: int) -> tuple[str, list[str
 
 def _inspect_image(path: Path) -> tuple[str, list[str]]:
     try:
-        from PIL import Image  # type: ignore
+        from PIL import Image
     except Exception:
         return "", ["install Pillow/OCR adapter to inspect image dimensions or extract text"]
     with Image.open(path) as img:

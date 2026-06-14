@@ -1,5 +1,16 @@
 # MIDAS
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-success.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](docs/ROADMAP.md)
+[![Lint: Ruff](https://img.shields.io/badge/lint-Ruff-261230.svg)](https://docs.astral.sh/ruff/)
+[![Types: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](https://mypy-lang.org/)
+[![Proof: 17/17 evals](https://img.shields.io/badge/proof-17%2F17%20evals-2a4d3a.svg)](TRANSPARENCY.md)
+
+<!-- After the first push to GitHub, add the live CI badge (replace <owner>/<repo>):
+[![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+-->
+
 Proof-first business operator for founders, agencies, consultants, and small teams.
 
 MIDAS researches a market, checks sources, proposes a Daily Revenue Move, drafts the

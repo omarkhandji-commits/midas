@@ -108,10 +108,10 @@ class _Guard:
     def set_actual(self, usd: float) -> None:
         self._actual = usd
 
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        # Commit the spend only on clean exit; never suppress exceptions (returns None).
         if exc_type is None:
             usd = self._actual if self._actual is not None else self._est
             self._fuse.commit(
                 usd, run_id=self._run_id, task_id=self._task_id, kind=self._kind, model=self._model
             )
-        return False
