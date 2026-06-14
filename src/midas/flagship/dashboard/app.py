@@ -436,6 +436,126 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         )
         return _json(200, {"ok": True, "channel": status_json})
 
+    @app.post("/api/channels/discord")
+    async def api_channels_discord_connect(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            bot_token = str(body.get("bot_token") or "")
+            owner_user_id = str(body.get("owner_user_id") or "")
+            guild_id = str(body.get("guild_id") or "")
+            status_json = deps.channels.connect_discord(
+                bot_token=bot_token,
+                owner_user_id=owner_user_id,
+                guild_id=guild_id,
+            ).to_json()
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="channels.discord.connect",
+            inputs={
+                "token_supplied": bool(bot_token.strip()),
+                "owner_supplied": bool(owner_user_id.strip()),
+                "guild_supplied": bool(guild_id.strip()),
+            },
+            outputs={"connected": status_json["connected"], "missing": status_json["missing"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
+    @app.post("/api/channels/discord/test")
+    def api_channels_discord_test(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        result = deps.channels.test_discord()
+        _receipt(
+            deps,
+            tool="channels.discord.test",
+            inputs={"channel": "discord"},
+            outputs={"ok": result["ok"], "missing": result["missing"]},
+            decision=Decision.ALLOW if result["ok"] else Decision.DENY,
+        )
+        return _json(200, result)
+
+    @app.delete("/api/channels/discord")
+    def api_channels_discord_remove(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        status_json = deps.channels.remove_discord().to_json()
+        _receipt(
+            deps,
+            tool="channels.discord.remove",
+            inputs={"channel": "discord"},
+            outputs={"connected": status_json["connected"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
+    @app.post("/api/channels/slack")
+    async def api_channels_slack_connect(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            bot_token = str(body.get("bot_token") or "")
+            owner_user_id = str(body.get("owner_user_id") or "")
+            signing_secret = str(body.get("signing_secret") or "")
+            status_json = deps.channels.connect_slack(
+                bot_token=bot_token,
+                owner_user_id=owner_user_id,
+                signing_secret=signing_secret,
+            ).to_json()
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="channels.slack.connect",
+            inputs={
+                "token_supplied": bool(bot_token.strip()),
+                "owner_supplied": bool(owner_user_id.strip()),
+                "signing_secret_supplied": bool(signing_secret.strip()),
+            },
+            outputs={"connected": status_json["connected"], "missing": status_json["missing"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
+    @app.post("/api/channels/slack/test")
+    def api_channels_slack_test(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        result = deps.channels.test_slack()
+        _receipt(
+            deps,
+            tool="channels.slack.test",
+            inputs={"channel": "slack"},
+            outputs={"ok": result["ok"], "missing": result["missing"]},
+            decision=Decision.ALLOW if result["ok"] else Decision.DENY,
+        )
+        return _json(200, result)
+
+    @app.delete("/api/channels/slack")
+    def api_channels_slack_remove(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        status_json = deps.channels.remove_slack().to_json()
+        _receipt(
+            deps,
+            tool="channels.slack.remove",
+            inputs={"channel": "slack"},
+            outputs={"connected": status_json["connected"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
     @app.get("/api/providers")
     def api_providers(request: Request) -> Response:
         _require_session(request)

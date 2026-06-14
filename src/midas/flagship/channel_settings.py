@@ -12,11 +12,24 @@ from typing import Any
 
 import httpx
 
-from midas.flagship.channels import TelegramBot, TelegramConfig
+from midas.flagship.channels import (
+    DiscordBot,
+    DiscordConfig,
+    SlackBot,
+    SlackConfig,
+    TelegramBot,
+    TelegramConfig,
+)
 from midas.flagship.provider_settings import SecretVault
 
 TELEGRAM_BOT_TOKEN = "TELEGRAM_BOT_TOKEN"
 TELEGRAM_OWNER_CHAT_ID = "TELEGRAM_OWNER_CHAT_ID"
+DISCORD_BOT_TOKEN = "DISCORD_BOT_TOKEN"
+DISCORD_OWNER_USER_ID = "DISCORD_OWNER_USER_ID"
+DISCORD_GUILD_ID = "DISCORD_GUILD_ID"
+SLACK_BOT_TOKEN = "SLACK_BOT_TOKEN"
+SLACK_OWNER_USER_ID = "SLACK_OWNER_USER_ID"
+SLACK_SIGNING_SECRET = "SLACK_SIGNING_SECRET"
 
 
 @dataclass(frozen=True)
@@ -40,24 +53,8 @@ class ChannelManager:
     def list_statuses(self) -> list[dict[str, Any]]:
         return [
             self.telegram_status().to_json(),
-            ChannelStatus(
-                name="discord",
-                label="Discord",
-                connected=False,
-                live_listener=False,
-                required=["DISCORD_BOT_TOKEN", "DISCORD_OWNER_USER_ID"],
-                missing=["DISCORD_BOT_TOKEN", "DISCORD_OWNER_USER_ID"],
-                notes="Planned next; same ApprovalQueue contract.",
-            ).to_json(),
-            ChannelStatus(
-                name="slack",
-                label="Slack",
-                connected=False,
-                live_listener=False,
-                required=["SLACK_BOT_TOKEN", "SLACK_OWNER_USER_ID"],
-                missing=["SLACK_BOT_TOKEN", "SLACK_OWNER_USER_ID"],
-                notes="Planned next; same ApprovalQueue contract.",
-            ).to_json(),
+            self.discord_status().to_json(),
+            self.slack_status().to_json(),
         ]
 
     def telegram_status(self) -> ChannelStatus:
@@ -76,6 +73,38 @@ class ChannelManager:
             notes="Long-poll listener; owner-gated callbacks only.",
         )
 
+    def discord_status(self) -> ChannelStatus:
+        missing = [
+            handle
+            for handle in (DISCORD_BOT_TOKEN, DISCORD_OWNER_USER_ID)
+            if not self.vault.get(handle)
+        ]
+        return ChannelStatus(
+            name="discord",
+            label="Discord",
+            connected=not missing,
+            live_listener=True,
+            required=[DISCORD_BOT_TOKEN, DISCORD_OWNER_USER_ID],
+            missing=missing,
+            notes="Button interaction bridge; owner-gated callbacks only.",
+        )
+
+    def slack_status(self) -> ChannelStatus:
+        missing = [
+            handle
+            for handle in (SLACK_BOT_TOKEN, SLACK_OWNER_USER_ID)
+            if not self.vault.get(handle)
+        ]
+        return ChannelStatus(
+            name="slack",
+            label="Slack",
+            connected=not missing,
+            live_listener=True,
+            required=[SLACK_BOT_TOKEN, SLACK_OWNER_USER_ID],
+            missing=missing,
+            notes="Block Kit action bridge; owner-gated callbacks only.",
+        )
+
     def connect_telegram(self, *, bot_token: str, owner_chat_id: str) -> ChannelStatus:
         if not bot_token.strip():
             raise ValueError("bot_token required")
@@ -89,6 +118,40 @@ class ChannelManager:
         self.vault.delete(TELEGRAM_BOT_TOKEN)
         self.vault.delete(TELEGRAM_OWNER_CHAT_ID)
         return self.telegram_status()
+
+    def connect_discord(
+        self, *, bot_token: str, owner_user_id: str, guild_id: str = ""
+    ) -> ChannelStatus:
+        self._require(bot_token, "bot_token")
+        self._require(owner_user_id, "owner_user_id")
+        self.vault.set(DISCORD_BOT_TOKEN, bot_token.strip())
+        self.vault.set(DISCORD_OWNER_USER_ID, owner_user_id.strip())
+        if guild_id.strip():
+            self.vault.set(DISCORD_GUILD_ID, guild_id.strip())
+        return self.discord_status()
+
+    def remove_discord(self) -> ChannelStatus:
+        self.vault.delete(DISCORD_BOT_TOKEN)
+        self.vault.delete(DISCORD_OWNER_USER_ID)
+        self.vault.delete(DISCORD_GUILD_ID)
+        return self.discord_status()
+
+    def connect_slack(
+        self, *, bot_token: str, owner_user_id: str, signing_secret: str = ""
+    ) -> ChannelStatus:
+        self._require(bot_token, "bot_token")
+        self._require(owner_user_id, "owner_user_id")
+        self.vault.set(SLACK_BOT_TOKEN, bot_token.strip())
+        self.vault.set(SLACK_OWNER_USER_ID, owner_user_id.strip())
+        if signing_secret.strip():
+            self.vault.set(SLACK_SIGNING_SECRET, signing_secret.strip())
+        return self.slack_status()
+
+    def remove_slack(self) -> ChannelStatus:
+        self.vault.delete(SLACK_BOT_TOKEN)
+        self.vault.delete(SLACK_OWNER_USER_ID)
+        self.vault.delete(SLACK_SIGNING_SECRET)
+        return self.slack_status()
 
     def test_telegram(self) -> dict[str, Any]:
         status = self.telegram_status()
@@ -104,12 +167,45 @@ class ChannelManager:
             "missing": status.missing,
         }
 
+    def test_discord(self) -> dict[str, Any]:
+        return _test_result("discord", self.discord_status())
+
+    def test_slack(self) -> dict[str, Any]:
+        return _test_result("slack", self.slack_status())
+
     def telegram_config(self) -> TelegramConfig | None:
         token = self.vault.get(TELEGRAM_BOT_TOKEN)
         owner = self.vault.get(TELEGRAM_OWNER_CHAT_ID)
         if not token or not owner:
             return None
         return TelegramConfig.make(bot_token=token, owner_chat_id=owner)
+
+    def discord_config(self) -> DiscordConfig | None:
+        token = self.vault.get(DISCORD_BOT_TOKEN)
+        owner = self.vault.get(DISCORD_OWNER_USER_ID)
+        if not token or not owner:
+            return None
+        return DiscordConfig.make(
+            bot_token=token,
+            owner_user_id=owner,
+            guild_id=self.vault.get(DISCORD_GUILD_ID) or "",
+        )
+
+    def slack_config(self) -> SlackConfig | None:
+        token = self.vault.get(SLACK_BOT_TOKEN)
+        owner = self.vault.get(SLACK_OWNER_USER_ID)
+        if not token or not owner:
+            return None
+        return SlackConfig.make(
+            bot_token=token,
+            owner_user_id=owner,
+            signing_secret=self.vault.get(SLACK_SIGNING_SECRET) or "",
+        )
+
+    @staticmethod
+    def _require(value: str, field: str) -> None:
+        if not value.strip():
+            raise ValueError(f"{field} required")
 
 
 class TelegramLongPollListener:
@@ -189,3 +285,40 @@ def _chat_id(update: dict[str, Any]) -> str:
     if isinstance(message, dict):
         return str(message.get("chat", {}).get("id", ""))
     return ""
+
+
+class DiscordInteractionHandler:
+    def __init__(self, *, config: DiscordConfig, queue: Any) -> None:
+        self.bot = DiscordBot(config, queue)
+
+    def handle_interaction(self, payload: dict[str, Any]) -> str:
+        user_id = str(payload.get("member", {}).get("user", {}).get("id", ""))
+        data = str(payload.get("data", {}).get("custom_id", ""))
+        return self.bot.handle_callback(user_id, data)
+
+
+class SlackActionHandler:
+    def __init__(self, *, config: SlackConfig, queue: Any) -> None:
+        self.bot = SlackBot(config, queue)
+
+    def handle_action(self, payload: dict[str, Any]) -> str:
+        user_id = str(payload.get("user", {}).get("id", ""))
+        actions = payload.get("actions")
+        if not isinstance(actions, list) or not actions:
+            return "Unrecognized action."
+        action_id = str(actions[0].get("action_id", ""))
+        return self.bot.handle_callback(user_id, action_id)
+
+
+def _test_result(channel: str, status: ChannelStatus) -> dict[str, Any]:
+    message = (
+        f"{status.label} credentials are present."
+        if status.connected
+        else "Missing fields."
+    )
+    return {
+        "ok": status.connected,
+        "channel": channel,
+        "message": message,
+        "missing": status.missing,
+    }
