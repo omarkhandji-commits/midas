@@ -14,20 +14,24 @@ not a function of vendor weather, network state, or wallet balance.
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 
 from midas.core.agents import Tool, ToolDenied, Toolset
 from midas.core.agents.summary import Finding, ProofLevel
 from midas.core.budget import BudgetExceeded, BudgetFuse, Caps, SpendStore
 from midas.core.config import load_policy
-from midas.core.config.models import ProvidersConfig, RoleConfig
+from midas.core.config.models import ProviderEntry, ProvidersConfig, RoleConfig
 from midas.core.context import ContextBudget, SafeContextCompressor
 from midas.core.eval import CaseResult, Eval, Suite
+from midas.core.providers import diagnose_providers
 from midas.core.receipts.models import Taint
-from midas.core.router import ChatResult, LLMRouter
+from midas.core.router import ChatResult, Council, LLMRouter
 from midas.core.sentinel import Sentinel
 from midas.core.web import SourceVerifier, StaticFetcher
 from midas.flagship.flows.discover import parse_candidates
+from midas.flagship.schedule import daily_scan_recipe
+from midas.flagship.skills import SkillRegistry, is_remote_skill_source
 
 
 # ── 1. fake-source clamping ──────────────────────────────────────────────────
@@ -219,6 +223,84 @@ def _eval_context_compression() -> list[CaseResult]:
 
 
 # ── suite ─────────────────────────────────────────────────────────────────────
+def _eval_operator_autonomy_guardrails() -> list[CaseResult]:
+    cases: list[CaseResult] = []
+
+    providers = ProvidersConfig(
+        providers={
+            "ollama": ProviderEntry(base_url_env="OLLAMA_BASE_URL"),
+            "openrouter": ProviderEntry(api_key_env="OPENROUTER_API_KEY"),
+        }
+    )
+    statuses = {s.name: s for s in diagnose_providers(providers, env={})}
+    cases.append(CaseResult(
+        name="local Ollama is valid without API key",
+        passed=statuses["ollama"].configured and statuses["ollama"].local,
+        expected="configured local provider",
+        actual=f"configured={statuses['ollama'].configured}",
+    ))
+    cases.append(CaseResult(
+        name="missing cloud key is visible before live run",
+        passed=statuses["openrouter"].missing == ("OPENROUTER_API_KEY",),
+        expected="OPENROUTER_API_KEY missing",
+        actual=",".join(statuses["openrouter"].missing),
+    ))
+
+    router = LLMRouter(
+        ProvidersConfig(roles={"cheap": RoleConfig(primary="m")}),
+        complete_fn=lambda model, msgs: ChatResult(
+            text={"a": "yes", "b": "no", "chair": "hold for human"}.get(model, "maybe"),
+            model=model,
+            prompt_tokens=1,
+            completion_tokens=1,
+            cost_usd=0.0,
+        ),
+    )
+    council = Council(router, members=["a", "b"], chairman="chair", agreement_threshold=0.5)
+    result = council.deliberate([{"role": "user", "content": "launch?"}])
+    cases.append(CaseResult(
+        name="council disagreement escalates to human",
+        passed=result.escalate_to_human,
+        expected="human escalation",
+        actual=f"agreement={result.agreement:.2f}",
+    ))
+
+    recipe = daily_scan_recipe(name="daily", niche="local seo")
+    cases.append(CaseResult(
+        name="scheduler outputs recipe instead of auto-installing",
+        passed="schtasks /Create" in recipe.windows_task and "midas scan" in recipe.command,
+        expected="copy-paste scheduler commands",
+        actual=recipe.command,
+    ))
+
+    remote = "https://example.com/skill.git"
+    cases.append(CaseResult(
+        name="remote skill source is approval-gated",
+        passed=is_remote_skill_source(remote),
+        expected="remote detected",
+        actual=remote,
+    ))
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        source = root / "unsafe"
+        source.mkdir()
+        (source / "SKILL.md").write_text("# Unsafe\n", encoding="utf-8")
+        (source / "run.ps1").write_text("Write-Host nope", encoding="utf-8")
+        rejected = False
+        try:
+            SkillRegistry(root / "registry").install_local(source)
+        except ValueError:
+            rejected = True
+    cases.append(CaseResult(
+        name="skill registry rejects executable payloads",
+        passed=rejected,
+        expected="rejected",
+        actual=f"rejected={rejected}",
+    ))
+    return cases
+
+
 def build_suite(policy_path: str | Path) -> Suite:
     return Suite(
         name="MIDAS Proof-First Eval Suite v0.1",
@@ -261,6 +343,14 @@ def build_suite(policy_path: str | Path) -> Suite:
                     "name the approval gate."
                 ),
                 run=_eval_assets,
+            ),
+            Eval(
+                name="operator autonomy guardrails",
+                description=(
+                    "Local providers, council disagreement, schedules, and skills "
+                    "stay explicit and approval-first."
+                ),
+                run=_eval_operator_autonomy_guardrails,
             ),
         ],
     )

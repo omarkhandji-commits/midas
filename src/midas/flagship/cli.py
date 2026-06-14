@@ -25,12 +25,30 @@ competitors_app = typer.Typer(
 )
 assets_app = typer.Typer(help="Generate business assets.", no_args_is_help=True)
 outcome_app = typer.Typer(help="Record what happened after a move.", no_args_is_help=True)
+providers_app = typer.Typer(help="Configure and diagnose LLM providers.", no_args_is_help=True)
+schedule_app = typer.Typer(
+    help="Create user-installed cron/scheduler recipes.", no_args_is_help=True
+)
+skills_app = typer.Typer(
+    help="Create and install approval-gated MIDAS skills.", no_args_is_help=True
+)
+media_app = typer.Typer(
+    help="Inspect local PDFs, images, audio, and video safely.", no_args_is_help=True
+)
+voice_app = typer.Typer(
+    help="Draft voice messages and approval-gated call plans.", no_args_is_help=True
+)
 
 app.add_typer(approvals_app, name="approvals")
 app.add_typer(memory_app, name="memory")
 app.add_typer(competitors_app, name="competitors")
 app.add_typer(assets_app, name="assets")
 app.add_typer(outcome_app, name="outcome")
+app.add_typer(providers_app, name="providers")
+app.add_typer(schedule_app, name="schedule")
+app.add_typer(skills_app, name="skills")
+app.add_typer(media_app, name="media")
+app.add_typer(voice_app, name="voice")
 
 
 @app.callback()
@@ -111,6 +129,7 @@ def eval(
 def scan(
     niche: str = typer.Argument(..., help="The niche to scan, e.g. 'tools for plumbers'."),
     live: bool = typer.Option(False, "--live", help="Use real LLM/search plumbing."),
+    mode: str = typer.Option("deep", "--mode", help="fast/deep/war-room."),
     base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
 ) -> None:
     """Produce a Daily Revenue Move and queue approval for the next outbound action."""
@@ -120,6 +139,8 @@ def scan(
     from midas.flagship.runtime import build_runtime
 
     rt = build_runtime(base_dir)
+    if mode not in {"fast", "deep", "war-room"}:
+        raise typer.BadParameter("mode must be fast, deep, or war-room")
     run_id = f"scan:{niche}"
     if live:
         report = scan_niche(
@@ -144,6 +165,7 @@ def scan(
             "daily_move": bool(report.daily_move),
             "proof_level": report.proof_level.value,
             "approval_id": approval_id,
+            "mode": mode,
         },
     )
     typer.echo(render_report(report))
@@ -404,6 +426,405 @@ def export(
     typer.echo(json.dumps(body, indent=2, ensure_ascii=False, default=str))
 
 
+@providers_app.command("list")
+def providers_list(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """List known providers and local/key status without calling the network."""
+    from midas.core.providers import diagnose_providers
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    for status in diagnose_providers(rt.config.providers):
+        state = "ready" if status.configured else "missing"
+        local = " local" if status.local else ""
+        missing = f" missing={','.join(status.missing)}" if status.missing else ""
+        typer.echo(f"{status.name}: {state}{local}{missing}")
+
+
+@providers_app.command("doctor")
+def providers_doctor(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Explain routing roles, council setup, and missing provider env vars."""
+    from midas.core.providers import diagnose_providers
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    cfg = rt.config.providers
+    typer.echo("Roles:")
+    for role, rc in cfg.roles.items():
+        fallbacks = f" -> {', '.join(rc.fallbacks)}" if rc.fallbacks else ""
+        typer.echo(f"- {role}: {rc.primary}{fallbacks}")
+    typer.echo("Council:")
+    typer.echo(
+        f"- enabled={cfg.council.enabled} members={len(cfg.council.members)} "
+        f"chairman={cfg.council.chairman or 'unset'}"
+    )
+    typer.echo("Providers:")
+    for status in diagnose_providers(cfg):
+        if status.configured:
+            typer.echo(f"- OK {status.name}")
+        else:
+            typer.echo(f"- MISSING {status.name}: {', '.join(status.missing) or 'not configured'}")
+
+
+@providers_app.command("example")
+def providers_example(provider: str = typer.Argument(..., help="Provider name.")) -> None:
+    """Print a safe providers.yml snippet for one provider."""
+    from midas.core.providers import render_provider_example
+
+    typer.echo(render_provider_example(provider))
+
+
+@providers_app.command("add")
+def providers_add(
+    provider: str = typer.Argument(..., help="Provider key, e.g. ollama/openrouter/openai."),
+    role: str | None = typer.Option(None, "--role", help="Role to set/update, e.g. cheap."),
+    model: str | None = typer.Option(None, "--model", help="LiteLLM model id for the role."),
+    fallback: Annotated[list[str] | None, typer.Option("--fallback")] = None,
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Add provider metadata and optionally wire a model role. Secrets stay in env vars."""
+    from midas.core.providers import catalog, render_provider_example
+
+    path = _providers_config_path(base_dir)
+    data = _read_providers_yaml(path)
+    data.setdefault("providers", {})
+    if provider not in data["providers"]:
+        snippet = render_provider_example(provider)
+        import yaml
+
+        snippet_data = yaml.safe_load(snippet) or {}
+        data["providers"].update(snippet_data)
+    if role and model:
+        data.setdefault("roles", {})
+        data["roles"][role] = {"primary": model, "fallbacks": fallback or []}
+    elif role or model:
+        raise typer.BadParameter("--role and --model must be used together")
+    _write_providers_yaml(path, data)
+    known = provider in catalog()
+    typer.echo(f"Provider {provider} {'configured' if known else 'added as custom'} in {path}")
+    if role and model:
+        typer.echo(f"Role {role}: {model}")
+
+
+@providers_app.command("test")
+def providers_test(
+    model: str = typer.Argument(..., help="Model id to test, e.g. ollama/llama3.1."),
+    live: bool = typer.Option(False, "--live", help="Make a real provider call."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Dry-run or live-test a single model through the MIDAS router."""
+    from midas.core.router import ChatResult, LLMRouter
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    if live:
+        res = rt.router.complete_model(
+            model,
+            [{"role": "user", "content": "Reply with MIDAS_OK only."}],
+            task_id=f"provider:test:{model}",
+            run_id="provider:test",
+            est_usd=0.02,
+        )
+    else:
+        router = LLMRouter(
+            rt.config.providers,
+            complete_fn=lambda m, msgs: ChatResult(
+                text="MIDAS_OK", model=m, prompt_tokens=6, completion_tokens=3, cost_usd=0.0
+            ),
+        )
+        res = router.complete_model(model, [{"role": "user", "content": "dry"}])
+    typer.echo(f"{res.model}: {res.text.strip()} cost=${res.cost_usd or 0:.6f}")
+
+
+@app.command()
+def council(
+    question: str = typer.Argument(..., help="High-stakes question to debate."),
+    live: bool = typer.Option(False, "--live", help="Use real configured models."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Run a budgeted multi-LLM council for high-stakes decisions."""
+    from midas.core.router import ChatResult, Council, LLMRouter
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    cfg = rt.config.providers.council
+    members = cfg.members or [rc.primary for rc in rt.config.providers.roles.values()]
+    chairman = cfg.chairman or (members[0] if members else "local/mock")
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are one member of a proof-first business council. "
+                "State assumptions, risks, evidence needed, and a clear recommendation."
+            ),
+        },
+        {"role": "user", "content": question},
+    ]
+    router = rt.router if live else LLMRouter(
+        rt.config.providers,
+        complete_fn=lambda m, msgs: ChatResult(
+            text=f"{m}: recommendation requires evidence, approval, and outcome tracking.",
+            model=m,
+            prompt_tokens=50,
+            completion_tokens=20,
+            cost_usd=0.0,
+        ),
+    )
+    result = Council(
+        router,
+        members=members,
+        chairman=chairman,
+        agreement_threshold=cfg.agreement_threshold,
+    ).deliberate(messages, run_id="council", task_id="council", est_usd_each=0.02)
+    typer.echo(f"Agreement: {result.agreement:.2f}")
+    typer.echo(f"Human approval needed: {result.escalate_to_human}")
+    typer.echo(result.final.text)
+
+
+@schedule_app.command("add")
+def schedule_add(
+    name: str = typer.Argument(..., help="Local recipe name."),
+    niche: str = typer.Argument(..., help="Business/niche to scan."),
+    at: str = typer.Option("09:00", "--at", help="HH:MM local time."),
+    mode: str = typer.Option("deep", "--mode", help="fast/deep/war-room."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Store and print a user-installed daily scan schedule recipe."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.schedule import ScheduleStore, daily_scan_recipe
+
+    if mode not in {"fast", "deep", "war-room"}:
+        raise typer.BadParameter("mode must be fast, deep, or war-room")
+    rt = build_runtime(base_dir)
+    recipe = daily_scan_recipe(
+        name=name,
+        niche=niche,
+        at=at,
+        base_dir=str(rt.base_dir),
+        mode=mode,
+    )
+    ScheduleStore(rt.state_dir / "schedules.json").add(recipe)
+    rt.append_receipt(
+        run_id="schedule:add",
+        agent="cli",
+        tool="schedule.add",
+        inputs={"name": name, "niche": niche, "at": at, "mode": mode},
+        outputs={"command": recipe.command},
+    )
+    _print_schedule_recipe(recipe)
+
+
+@schedule_app.command("list")
+def schedule_list(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """List stored schedule recipes."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.schedule import ScheduleStore
+
+    rt = build_runtime(base_dir)
+    rows = ScheduleStore(rt.state_dir / "schedules.json").list()
+    if not rows:
+        typer.echo("No schedule recipes.")
+        return
+    for row in rows:
+        typer.echo(f"{row.name}: {row.cadence} at {row.at} -> {row.command}")
+
+
+@schedule_app.command("recipe")
+def schedule_recipe(
+    niche: str = typer.Argument(..., help="Business/niche to scan."),
+    at: str = typer.Option("09:00", "--at", help="HH:MM local time."),
+    mode: str = typer.Option("deep", "--mode", help="fast/deep/war-room."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Print schedule commands without storing anything."""
+    from midas.flagship.schedule import daily_scan_recipe
+
+    if mode not in {"fast", "deep", "war-room"}:
+        raise typer.BadParameter("mode must be fast, deep, or war-room")
+    _print_schedule_recipe(
+        daily_scan_recipe(name="daily-scan", niche=niche, at=at, base_dir=base_dir, mode=mode)
+    )
+
+
+@skills_app.command("create")
+def skills_create(
+    name: str = typer.Argument(..., help="Skill name."),
+    summary: str = typer.Argument(..., help="What the skill helps MIDAS do."),
+    permission: Annotated[list[str] | None, typer.Option("--permission", "-p")] = None,
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Create a local MIDAS skill template."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.skills import SkillRegistry
+
+    rt = build_runtime(base_dir)
+    manifest = SkillRegistry(rt.state_dir).create(
+        name=name,
+        summary=summary,
+        permissions=permission or ["read"],
+    )
+    rt.append_receipt(
+        run_id="skills:create",
+        agent="cli",
+        tool="skills.create",
+        inputs={"name": name, "permissions": permission or ["read"]},
+        outputs={"skill": manifest.name, "sha256": manifest.sha256},
+    )
+    typer.echo(f"Created skill {manifest.name} sha256={manifest.sha256[:16]}")
+
+
+@skills_app.command("list")
+def skills_list(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """List installed local skills."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.skills import SkillRegistry
+
+    rt = build_runtime(base_dir)
+    rows = SkillRegistry(rt.state_dir).list()
+    if not rows:
+        typer.echo("No local MIDAS skills installed.")
+        return
+    for row in rows:
+        perms = ",".join(row.permissions)
+        typer.echo(f"{row.name} {row.version} perms={perms} sha={row.sha256[:12]}")
+
+
+@skills_app.command("install")
+def skills_install(
+    source: str = typer.Argument(..., help="Local skill folder. Remote URLs use plan-download."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Install a local skill folder after static safety validation."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.skills import SkillRegistry, is_remote_skill_source
+
+    if is_remote_skill_source(source):
+        raise typer.BadParameter("remote skill sources require `midas skills plan-download`")
+    rt = build_runtime(base_dir)
+    try:
+        manifest = SkillRegistry(rt.state_dir).install_local(source)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    rt.append_receipt(
+        run_id="skills:install",
+        agent="cli",
+        tool="skills.install",
+        inputs={"source": source},
+        outputs={"skill": manifest.name, "sha256": manifest.sha256},
+    )
+    typer.echo(f"Installed skill {manifest.name} sha256={manifest.sha256[:16]}")
+
+
+@skills_app.command("plan-download")
+def skills_plan_download(
+    url: str = typer.Argument(..., help="Remote Git/HTTPS skill source."),
+    reason: str = typer.Option("", "--reason", help="Why this skill is needed."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Queue approval for a remote skill download; does not download or execute."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.skills import is_remote_skill_source
+
+    if not is_remote_skill_source(url):
+        raise typer.BadParameter("plan-download expects a remote URL")
+    rt = build_runtime(base_dir)
+    req = rt.approvals.enqueue(
+        run_id="skills:plan-download",
+        agent="midas",
+        tool="skills.download",
+        action="external_fetch",
+        summary=f"Review remote skill before download: {url}",
+        payload={"url": url, "reason": reason, "requires_manual_review": True},
+    )
+    rt.append_receipt(
+        run_id="skills:plan-download",
+        agent="cli",
+        tool="skills.plan_download",
+        decision=Decision.QUEUE_APPROVAL,
+        inputs={"url": url},
+        outputs={"approval_id": req.id},
+    )
+    typer.echo(f"Approval queued for remote skill review: #{req.id}")
+
+
+@media_app.command("inspect")
+def media_inspect(
+    path: str = typer.Argument(..., help="Local file to inspect."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Inspect a local document/media file without external model calls."""
+    from midas.flagship.multimodal import inspect_media
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    inspection = inspect_media(path)
+    rt.append_receipt(
+        run_id="media:inspect",
+        agent="cli",
+        tool="media.inspect",
+        inputs={"path": inspection.path},
+        outputs={
+            "kind": inspection.kind,
+            "size_bytes": inspection.size_bytes,
+            "sha256": inspection.sha256,
+            "text_len": len(inspection.text),
+            "warnings": inspection.warnings,
+        },
+    )
+    typer.echo(json.dumps(inspection.as_dict(), indent=2, ensure_ascii=False))
+
+
+@voice_app.command("draft")
+def voice_draft(
+    text: str = typer.Argument(..., help="Message to turn into a voice draft."),
+) -> None:
+    """Draft a voice note payload; sending still requires approval."""
+    from midas.flagship.voice import draft_voice_message
+
+    typer.echo(json.dumps(draft_voice_message(text).as_dict(), indent=2, ensure_ascii=False))
+
+
+@voice_app.command("call-plan")
+def voice_call_plan(
+    contact: str = typer.Argument(..., help="Contact label, not scraped PII."),
+    purpose: str = typer.Argument(..., help="Reason for the call."),
+    offer: str = typer.Option("", "--offer", help="Offer/problem to discuss."),
+    queue: bool = typer.Option(False, "--queue", help="Queue approval for this call plan."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Prepare a consent-first phone call plan; no phone call is placed."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.voice import plan_call
+
+    plan = plan_call(contact_label=contact, purpose=purpose, offer=offer or purpose)
+    if queue:
+        rt = build_runtime(base_dir)
+        req = rt.approvals.enqueue(
+            run_id="voice:call-plan",
+            agent="midas",
+            tool="phone.call",
+            action="phone_call",
+            summary=f"Review call plan for {contact}: {purpose}",
+            payload=plan.as_dict(),
+        )
+        rt.append_receipt(
+            run_id="voice:call-plan",
+            agent="cli",
+            tool="voice.call_plan",
+            decision=Decision.QUEUE_APPROVAL,
+            inputs={"contact": contact, "purpose": purpose},
+            outputs={"approval_id": req.id},
+        )
+    typer.echo(json.dumps(plan.as_dict(), indent=2, ensure_ascii=False))
+
+
 def _queue_move_approval(rt: object, report: object, *, run_id: str) -> int | None:
     move = getattr(report, "daily_move", None)
     if move is None:
@@ -466,6 +887,45 @@ def _memory_json(row: Any) -> dict[str, object]:
         "tags": row.tags,
         "superseded": row.superseded,
     }
+
+
+def _providers_config_path(base_dir: str | Path) -> Path:
+    base = Path(base_dir)
+    path = base / "config" / "providers.yml"
+    if path.exists():
+        return path
+    return path
+
+
+def _read_providers_yaml(path: Path) -> dict[str, Any]:
+    import yaml
+
+    if path.exists():
+        return dict(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+    example = path.parent / "providers.example.yml"
+    if example.exists():
+        return dict(yaml.safe_load(example.read_text(encoding="utf-8")) or {})
+    return {"roles": {}, "providers": {}, "routing": {}}
+
+
+def _write_providers_yaml(path: Path, data: dict[str, Any]) -> None:
+    import yaml
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+
+def _print_schedule_recipe(recipe: Any) -> None:
+    typer.echo(f"Command: {recipe.command}")
+    typer.echo("\nWindows Task Scheduler:")
+    typer.echo(recipe.windows_task)
+    typer.echo("\ncron:")
+    typer.echo(recipe.cron_line)
+    typer.echo("\nGitHub Actions snippet:")
+    typer.echo(recipe.github_actions)
 
 
 if __name__ == "__main__":

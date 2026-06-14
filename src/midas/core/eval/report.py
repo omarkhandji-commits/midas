@@ -56,8 +56,8 @@ def render_report(results: list[EvalResult], *, title: str = "MIDAS Transparency
     lines.append("")
     lines.append(
         "Reproducibility: every eval is deterministic. Inputs are inlined, the LLM is "
-        "mocked via the router's `complete_fn`, and the harness writes no external state. "
-        "Rerun with `midas eval` from a fresh checkout to verify."
+        "mocked via the router's `complete_fn`, and any file writes are temporary/local "
+        "test fixtures. Rerun with `midas eval` from a fresh checkout to verify."
     )
     return "\n".join(lines)
 

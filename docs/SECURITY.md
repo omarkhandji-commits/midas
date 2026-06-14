@@ -59,6 +59,13 @@ are detectable. This is your "what did the agent do and why" record.
 - The agent cannot modify its own security policy or the audit log.
 - Optional: run the standalone version in a container with no host mounts beyond the workspace.
 
+### 8. Skills and schedules
+- Local skills must contain `SKILL.md` and pass static checks before install.
+- Executable payloads such as `.exe`, `.bat`, `.cmd`, `.ps1`, `.vbs`, and `.dll` are denied.
+- Remote skill downloads are queued for approval and manual review; MIDAS does not auto-install them.
+- Schedule commands are recipes only. MIDAS prints cron, Windows Task Scheduler, and GitHub
+  Actions snippets, but the operator installs them deliberately.
+
 ### 8. Kill switch
 `MIDAS_KILL_SWITCH=on` (env) or the word "stop"/"freeze" from the owner halts **all** agent
 actions immediately. The agent then only answers direct questions.

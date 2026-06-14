@@ -50,6 +50,7 @@ def test_full_suite_passes_clean_checkout() -> None:
     assert {r.eval_name for r in results} == {
         "fake-source clamping", "unsourced model claims", "budget fuse",
         "lethal trifecta", "context compression fidelity", "asset quality",
+        "operator autonomy guardrails",
     }
     for r in results:
         assert r.verdict == "pass", f"{r.eval_name} failed: {[c for c in r.cases if not c.passed]}"

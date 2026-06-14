@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "project": {
+    "name": "MIDAS",
+    "type": "python cli agent",
+    "audience": "founders, agencies, consultants, and developers",
+    "destination": "GitHub repository",
+    "promise": "Proof-first business operator that researches markets, verifies sources, drafts assets, requests approval for risky actions, records receipts, and tracks outcomes.",
+    "critical_flows": [
+      "midas scan creates a Daily Revenue Move with sources and approval queue",
+      "midas eval proves source, budget, context, asset, provider, schedule, and skill guardrails",
+      "midas providers diagnoses local and cloud LLM routing",
+      "midas skills plan-download queues remote skill approval instead of installing automatically"
+    ]
+  },
+  "commands": {
+    "pytest": ".venv\\Scripts\\python.exe -B -m pytest -q -p no:cacheprovider",
+    "eval": ".venv\\Scripts\\python.exe -B -m midas.flagship.cli eval",
+    "build": ".venv\\Scripts\\python.exe -B -m build --no-isolation"
+  },
+  "evidence": {
+    "runtime": [
+      "pytest full suite passed locally",
+      "midas eval passed 17/17 cases across 7 evals",
+      "package build produced wheel and sdist"
+    ],
+    "visual": [
+      "dashboard API/security tests pass; screenshot capture should be added before marketing launch assets"
+    ],
+    "ci": [
+      "GitHub Actions CI workflow runs pytest and midas eval"
+    ],
+    "independent_review": []
+  },
+  "exclude": [
+    ".git",
+    ".venv",
+    ".midas",
+    ".hypothesis",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".shipvitals-evidence",
+    "dist",
+    "build",
+    "__pycache__"
+  ]
+}

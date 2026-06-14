@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Autonomy(str, Enum):
+class Autonomy(StrEnum):
     PROPOSE_ONLY = "propose-only"
     SEMI_AUTO = "semi-auto"
     FULL_AUTO_GUARDED = "full-auto-guarded"
 
 
-class Confidence(str, Enum):
+class Confidence(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -88,8 +87,8 @@ class RoleConfig(BaseModel):
 
 
 class ProviderEntry(BaseModel):
-    api_key_env: Optional[str] = None
-    base_url_env: Optional[str] = None
+    api_key_env: str | None = None
+    base_url_env: str | None = None
 
 
 class RoutingPolicy(BaseModel):
@@ -100,12 +99,21 @@ class RoutingPolicy(BaseModel):
     enforce_spend_caps: bool = True
 
 
+class CouncilPolicy(BaseModel):
+    enabled: bool = True
+    members: list[str] = []
+    chairman: str = ""
+    agreement_threshold: float = 0.55
+    modes: list[str] = ["war-room"]
+
+
 class ProvidersConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     roles: dict[str, RoleConfig] = {}
     providers: dict[str, ProviderEntry] = {}
     routing: RoutingPolicy = RoutingPolicy()
+    council: CouncilPolicy = CouncilPolicy()
 
 
 # ── .env ────────────────────────────────────────────────────────────────────
@@ -116,20 +124,20 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore", case_sensitive=False
     )
 
-    midas_autonomy: Optional[str] = None
+    midas_autonomy: str | None = None
     midas_kill_switch: bool = False
-    midas_per_task_spend_cap: Optional[float] = None
-    midas_daily_spend_cap: Optional[float] = None
-    midas_monthly_spend_cap: Optional[float] = None
-    midas_model_cheap: Optional[str] = None
-    midas_model_smart: Optional[str] = None
+    midas_per_task_spend_cap: float | None = None
+    midas_daily_spend_cap: float | None = None
+    midas_monthly_spend_cap: float | None = None
+    midas_model_cheap: str | None = None
+    midas_model_smart: str | None = None
 
-    telegram_bot_token: Optional[str] = None
-    telegram_owner_chat_id: Optional[str] = None
+    telegram_bot_token: str | None = None
+    telegram_owner_chat_id: str | None = None
 
-    openai_api_key: Optional[str] = None
-    anthropic_api_key: Optional[str] = None
-    mistral_api_key: Optional[str] = None
-    groq_api_key: Optional[str] = None
-    together_api_key: Optional[str] = None
-    ollama_base_url: Optional[str] = None
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    mistral_api_key: str | None = None
+    groq_api_key: str | None = None
+    together_api_key: str | None = None
+    ollama_base_url: str | None = None

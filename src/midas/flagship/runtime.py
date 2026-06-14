@@ -49,6 +49,7 @@ def _load_or_create_file_signer(state: Path) -> Signer:
 @dataclass
 class Runtime:
     base_dir: Path
+    state_dir: Path
     config: AppConfig
     fuse: BudgetFuse
     ledger: ReceiptLedger
@@ -136,6 +137,7 @@ def build_runtime(base_dir: str | Path) -> Runtime:
 
     return Runtime(
         base_dir=base,
+        state_dir=state,
         config=config,
         fuse=fuse,
         ledger=ledger,

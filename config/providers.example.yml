@@ -14,6 +14,10 @@ roles:
     fallbacks:
       - openai/gpt-4.1
       - together/Nous-Hermes   # open "Hermes" family
+  judge:                       # critique / safety / contradiction checks
+    primary: openai/gpt-4.1
+    fallbacks:
+      - anthropic/claude-sonnet
 
 # ── Providers (keys come from .env, never hard-coded here) ──
 providers:
@@ -27,8 +31,21 @@ providers:
     api_key_env: GROQ_API_KEY
   together:                    # Nous/Hermes and other open models
     api_key_env: TOGETHER_API_KEY
+  openrouter:
+    api_key_env: OPENROUTER_API_KEY
+  deepseek:
+    api_key_env: DEEPSEEK_API_KEY
+  google:
+    api_key_env: GEMINI_API_KEY
+  openai_compatible:           # custom gateways, LM proxies, self-hosted APIs
+    api_key_env: OPENAI_COMPATIBLE_API_KEY
+    base_url_env: OPENAI_COMPATIBLE_BASE_URL
   ollama:                      # local, no key
     base_url_env: OLLAMA_BASE_URL
+  lm_studio:                   # local OpenAI-compatible server
+    base_url_env: LM_STUDIO_BASE_URL
+  vllm:                        # local/server OpenAI-compatible endpoint
+    base_url_env: VLLM_BASE_URL
 
 # ── Routing rules ──
 routing:
@@ -41,3 +58,17 @@ routing:
   max_retries: 2
   # Hard cost ceiling enforced by the router itself (mirrors policy.yml spend_caps)
   enforce_spend_caps: true
+
+# ── Multi-LLM council ──
+# Only use for expensive, high-stakes thinking: pricing, strategy, contradiction,
+# public/client actions, security/legal uncertainty, or "war-room" runs.
+council:
+  enabled: true
+  members:
+    - ollama/llama3.1
+    - groq/llama-3.1-8b
+    - mistral/mistral-small
+  chairman: anthropic/claude-sonnet
+  agreement_threshold: 0.55
+  modes:
+    - war-room

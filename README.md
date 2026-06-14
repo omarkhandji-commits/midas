@@ -1,87 +1,171 @@
-# MIDAS — Autonomous Revenue Operator
+# MIDAS
 
-> Find, build, launch and sell the most profitable opportunities — with the least
-> support and the least risk — and stay accountable in **cash**, not busywork.
+Proof-first business operator for founders, agencies, consultants, and small teams.
 
-MIDAS is an open-source autonomous business agent. Unlike task-loop agents that burn
-tokens and ship nothing, MIDAS is **revenue-accountable**: every action carries an
-expected ROI and a hard cost budget, it keeps a live P&L, and it refuses work that
-doesn't ladder to money. It is **provider-agnostic** (any LLM API — OpenAI, Anthropic,
-Mistral, Groq, Nous/Hermes, local Ollama), **safe by default** (nothing leaves your
-machine without a one-tap human approval), and reachable from **Telegram, desktop, and
-CLI** so non-developers can run it too.
+MIDAS researches a market, checks sources, proposes a Daily Revenue Move, drafts the
+business assets, asks for approval before anything risky, records receipts, tracks
+outcomes, and gets cheaper over time through cache, memory, local models, and budget
+guards.
 
----
+No revenue guarantee. No spam. No black-box autonomy. MIDAS is built to be useful in
+real business work while keeping the operator in control.
 
-## Why MIDAS exists (the gap)
+## What MIDAS Does
 
-The existing agent landscape splits into three buckets, and every bucket has the same
-complaint attached to it:
+- Finds business opportunities with source receipts, not model vibes.
+- Generates assets: offers, landing copy, outreach email, SEO brief, objections,
+  proposal/invoice PDFs, call script, video script, and a 7-day action plan.
+- Tracks competitors through Market Radar snapshots and dated diffs.
+- Keeps memory for user, business, decisions, results, market, and errors.
+- Supports local and cloud LLM routing through LiteLLM-style model ids.
+- Runs multi-LLM council reviews for high-stakes questions.
+- Creates user-installed schedule recipes for cron, Windows Task Scheduler, and
+  GitHub Actions.
+- Creates and installs local skills with static safety checks; remote skills require
+  approval before download.
+- Inspects local PDFs, images, audio, and video safely; audio/video can use transcript
+  sidecars without external calls.
+- Drafts voice notes and consent-first call plans; no real call is placed by default.
+- Ships a local Operator Console for approvals, proofs, memory, assets, market radar,
+  and budget visibility.
 
-| Tool family | What people complain about |
-|---|---|
-| AutoGPT / BabyAGI / dev loops | "It looped, burned \$ in API calls, and produced nothing sellable." |
-| Manus / Devin / closed SaaS | "I can't trust a black box with my accounts, my money, my repo — and it's expensive." |
-| Generic assistants (Hermes, etc.) | "It chats and researches, but it has no business accountability and no memory of my taste." |
+## Why It Is Different
 
-**Nobody ships an agent that is all of these at once:** open-source **+** provider-agnostic
-**+** cost-capped **+** revenue-accountable **+** safe-by-default **+** usable by a non-developer
-from their phone. That is the gap MIDAS fills.
+Most agents optimize for activity. MIDAS optimizes for proof, decisions, and outcomes.
 
-## The five differentiators
+| Agent type | Common failure | MIDAS behavior |
+|---|---|---|
+| Generic chat agents | Good advice, weak follow-through | Daily Revenue Move + assets + outcome loop |
+| Auto-loop agents | Token burn and unsafe actions | budget fuse + approvals + receipts |
+| Closed SaaS agents | Hard to audit or self-host | local-first, open repo, replayable evals |
+| Dev workspaces | Strong coding, weak business memory | business memory + market radar + revenue assets |
 
-1. **Revenue-accountable, not task-accountable.** Expected-ROI tag + token budget on every
-   action. Live P&L. Refuses busywork. → kills "it spent money and made nothing".
-2. **Two-key safety (the Vault gate).** Default-deny. Email, posting, deploys, payments,
-   repo writes and file deletes all require an explicit human Approve (one tap in Telegram).
-   Append-only, hash-chained audit log. → kills "I'm scared to give it access".
-3. **Provider-agnostic + cost-capped.** Any LLM API. Cheap model by default, strong model
-   only for high-stakes calls. Hard daily / per-task spend caps with auto-halt. → kills the
-   surprise bill.
-4. **Reachable everywhere.** Telegram bot + desktop app + CLI. → non-devs can run it.
-5. **Learns your taste.** Every approve/reject is stored and feeds future scoring. → sharper
-   every week.
+## Quickstart
 
-## Hard rules (non-negotiable)
-
-No spam · no scams · no false promises · no guaranteed-income claims to customers · no mass
-sending without approval · no payment without approval · no deletion/modification of critical
-files without approval · no marketing lies · no high-support traps · no needless complexity.
-
-The agent is **autonomous to analyze, compare, draft and propose**. It must get human
-approval before any **outbound or irreversible** action. See [`docs/SECURITY.md`](docs/SECURITY.md).
-
-## Status
-
-**V0 — scaffold.** This repo currently contains the operating contract, the system prompt,
-the full architecture, the scoring engine spec, the security model, and the build roadmap.
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for V0 → V3.
-
-## Repo map
-
-```
-midas/
-├─ README.md                 ← you are here
-├─ CLAUDE.md                 ← operating contract for the agent runtime
-├─ agent/system-prompt.md    ← the full, copy-paste system prompt
-├─ docs/ARCHITECTURE.md      ← sub-agents, daily workflow, stack, free tools
-├─ docs/SECURITY.md          ← threat model, two-key gate, spend caps, audit log
-├─ docs/SCORING.md           ← the /100 opportunity score
-├─ docs/ROADMAP.md           ← V0 → V3 build plan
-├─ config/policy.yml         ← autonomy gates, spend caps, allow/deny lists
-├─ config/providers.example.yml ← provider-agnostic LLM routing
-└─ memory/                   ← decision memory, P&L, leads (gitignored)
+```bash
+python -m venv .venv
+.venv\Scripts\python -m pip install -e ".[llm,web,dev]"
+.venv\Scripts\midas setup
+.venv\Scripts\midas scan "agence SEO locale"
+.venv\Scripts\midas eval
 ```
 
-## Quickstart (V0, manual)
+Open the local console:
 
-1. Copy `.env.example` → `.env` and fill at least one LLM provider key.
-2. Open this folder in Claude Code (or your agent runtime).
-3. Paste [`agent/system-prompt.md`](agent/system-prompt.md) as the system prompt.
-4. Ask: *"Run a daily opportunity scan and give me a scored shortlist."*
+```bash
+.venv\Scripts\midas dashboard
+```
 
-> ⚠️ Never commit `.env` or anything in `memory/`. The `.gitignore` already blocks them.
+Configure providers:
 
-## License
+```bash
+.venv\Scripts\midas providers list
+.venv\Scripts\midas providers doctor
+.venv\Scripts\midas providers add ollama --role cheap --model ollama/llama3.1
+.venv\Scripts\midas providers test ollama/llama3.1
+```
 
-MIT (intended). Use legally and ethically. MIDAS does not guarantee income.
+Use a multi-model council only when stakes justify the cost:
+
+```bash
+.venv\Scripts\midas council "Should I launch this offer now?"
+```
+
+Create a schedule recipe, then install it yourself if you want:
+
+```bash
+.venv\Scripts\midas schedule recipe "agence SEO locale" --at 09:00 --mode deep
+```
+
+Create a local skill:
+
+```bash
+.venv\Scripts\midas skills create "market-radar-pro" "Track competitors and summarize opportunities."
+```
+
+## LLM Support
+
+MIDAS is provider-agnostic. The example config supports:
+
+- local: Ollama, LM Studio, vLLM, any OpenAI-compatible endpoint;
+- cloud: OpenAI, Anthropic, Google Gemini, Azure OpenAI, Vertex AI, AWS Bedrock,
+  Mistral, Groq, Together, OpenRouter, DeepSeek, Cohere, Perplexity, xAI,
+  Cerebras, Fireworks, Replicate, Hugging Face.
+
+Secrets stay in `.env` or environment variables. `providers.yml` stores only provider
+metadata and model ids.
+
+## Safety Model
+
+Default mode is approval-first. MIDAS may read, reason, draft, and prepare. It must
+ask before external sends, public posts, money/legal actions, phone calls, risky local
+writes, or remote skill downloads.
+
+Core controls:
+
+- Sentinel risk gate.
+- Approval queue.
+- Hash-chained receipts.
+- Budget fuse.
+- Source verifier.
+- Context compression that preserves proof originals.
+- Local dashboard locked to loopback.
+- Skill registry with executable-payload rejection.
+
+See [docs/SECURITY.md](docs/SECURITY.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md),
+and [DISCLAIMER.md](DISCLAIMER.md).
+
+## Proof
+
+Run the public eval suite:
+
+```bash
+.venv\Scripts\midas eval
+```
+
+Current transparency report: **17/17 cases across 7 evals pass**.
+
+Covered invariants include fake-source clamping, unsourced model claims, budget fuse,
+indirect prompt-injection exfiltration, context compression fidelity, asset quality,
+local provider support, council human escalation, schedule safety, and skill install
+safety.
+
+## Core Commands
+
+```bash
+midas setup
+midas dashboard
+midas scan "<niche>"
+midas providers list|doctor|add|test|example
+midas council "<question>"
+midas competitors add|list|watch
+midas approvals list|approve|reject
+midas memory add|search|export
+midas outcome record
+midas assets generate
+midas schedule add|list|recipe
+midas skills create|list|install|plan-download
+midas media inspect
+midas voice draft|call-plan
+midas eval
+midas export
+```
+
+## Repository Map
+
+```text
+src/midas/core/       core safety, routing, budget, memory, receipts, web, context
+src/midas/flagship/   product runtime, CLI, dashboard, market radar, assets, evals
+config/               policy and provider examples
+docs/                 architecture, security, roadmap, scoring, threat model
+tests/                deterministic unit/security/API eval coverage
+TRANSPARENCY.md       current reproducible eval report
+```
+
+## Launch Notes
+
+MIDAS is not financial, legal, tax, security, or medical advice. It does not guarantee
+income, leads, rankings, sales, or business results. Operators are responsible for
+reviewing actions, following laws, respecting platform rules, and validating outputs.
+
+License: MIT.

@@ -22,3 +22,9 @@ def test_scan_demo_prints_daily_revenue_move() -> None:
     assert "Proof:" in result.stdout
     assert "requires your approval" in result.stdout  # approval-default
     assert "No revenue is promised" in result.stdout
+
+
+def test_scan_accepts_run_mode() -> None:
+    result = runner.invoke(app, ["scan", "tools for plumbers", "--mode", "war-room"])
+    assert result.exit_code == 0
+    assert "DAILY REVENUE MOVE" in result.stdout
