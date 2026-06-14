@@ -119,6 +119,7 @@ class Runtime:
             providers=self.providers,
             settings_store=self.settings_store,
             router=self.router,
+            sentinel=self.sentinel,
         )
 
 

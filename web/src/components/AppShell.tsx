@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useState } from "react";
 import {
   MessageSquare,
   Compass,
@@ -65,6 +66,22 @@ const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
   );
 
 export function AppShell() {
+  const [snapshot, setSnapshot] = useState({ spent_usd: 0, receipts: 0, pending: 0 });
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return;
+    const events = new EventSource("/events");
+    events.addEventListener("tick", (event) => {
+      try {
+        setSnapshot(JSON.parse((event as MessageEvent).data));
+      } catch {
+        return;
+      }
+    });
+    events.onerror = () => events.close();
+    return () => events.close();
+  }, []);
+
   return (
     <div className="grid h-full grid-cols-[260px_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)]">
       <header className="col-span-2 sticky top-0 z-10 flex items-baseline justify-between gap-6 border-b border-rule bg-paper px-8 py-3">
@@ -81,8 +98,9 @@ export function AppShell() {
           </span>
         </div>
         <div className="flex items-baseline gap-6 font-mono text-xs text-mute">
-          <MetaPill label="Spent" value="$0.0000" id="spent-usd" />
-          <MetaPill label="Receipts" value="0" id="receipt-count" />
+          <MetaPill label="Spent" value={`$${snapshot.spent_usd.toFixed(4)}`} id="spent-usd" />
+          <MetaPill label="Receipts" value={String(snapshot.receipts)} id="receipt-count" />
+          <MetaPill label="Pending" value={String(snapshot.pending)} id="pending-count" />
           <span className="inline-flex items-center gap-1.5 text-accent">
             <Shield className="size-3.5" aria-hidden />
             <span className="uppercase tracking-[0.08em]">Chain OK</span>

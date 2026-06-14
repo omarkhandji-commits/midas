@@ -45,6 +45,72 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return parsed as T;
 }
 
+export type SseFrame = { event: string; data: unknown };
+
+async function streamPost(
+  path: string,
+  body: unknown,
+  onFrame: (frame: SseFrame) => void,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    Accept: "text/event-stream",
+    "Content-Type": "application/json",
+    [CSRF_HEADER]: readCsrf(),
+  };
+  const res = await fetch(path, {
+    method: "POST",
+    headers,
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text();
+    throw new ApiError(res.status, safeJson(text), `POST ${path} → ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let reading = true;
+  while (reading) {
+    const { done, value } = await reader.read();
+    if (done) {
+      reading = false;
+      continue;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const parsed = parseSseFrames(buffer);
+    buffer = parsed.rest;
+    parsed.frames.forEach(onFrame);
+  }
+  buffer += decoder.decode();
+  const tail = parseSseFrames(buffer + "\n\n");
+  tail.frames.forEach(onFrame);
+}
+
+export function parseSseFrames(input: string): { frames: SseFrame[]; rest: string } {
+  const frames: SseFrame[] = [];
+  let rest = input;
+  let parsing = true;
+  while (parsing) {
+    const index = rest.indexOf("\n\n");
+    if (index === -1) {
+      parsing = false;
+      continue;
+    }
+    const raw = rest.slice(0, index);
+    rest = rest.slice(index + 2);
+    if (!raw.trim()) continue;
+    let event = "message";
+    const dataLines: string[] = [];
+    raw.split("\n").forEach((line) => {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    });
+    frames.push({ event, data: safeJson(dataLines.join("\n")) });
+  }
+  return { frames, rest };
+}
+
 function safeJson(text: string): unknown {
   try { return JSON.parse(text); } catch { return text; }
 }
@@ -53,4 +119,5 @@ export const api = {
   get:  <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   delete: <T>(path: string) => request<T>("DELETE", path),
+  streamPost,
 };

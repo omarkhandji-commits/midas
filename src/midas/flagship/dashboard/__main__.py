@@ -17,10 +17,12 @@ from pathlib import Path
 import uvicorn
 
 from midas.core.approvals import ApprovalQueue
-from midas.core.config.models import ProviderEntry, ProvidersConfig
+from midas.core.config.models import PolicyConfig, ProviderEntry, ProvidersConfig, RoleConfig
 from midas.core.memory import MemoryStore
 from midas.core.receipts import ReceiptLedger, Signer
 from midas.core.receipts.models import Decision
+from midas.core.router import ChatResult, LLMRouter
+from midas.core.sentinel import Sentinel
 from midas.flagship.provider_settings import (
     DashboardSettings,
     MemorySecretVault,
@@ -43,10 +45,26 @@ def build_demo_deps() -> DashboardDeps:
     ledger = ReceiptLedger(base / "receipts.jsonl", Signer.from_hex_seed("ee" * 32))
     memory = MemoryStore(base / "memory.db")
     providers_config = ProvidersConfig(
+        roles={"cheap": RoleConfig(primary="local/demo")},
         providers={"ollama": ProviderEntry(base_url_env="OLLAMA_BASE_URL")}
     )
     provider_manager = ProviderManager(providers_config, MemorySecretVault())
     settings_store = SettingsStore(base / "dashboard-settings.json", DashboardSettings())
+    router = LLMRouter(
+        providers_config,
+        ledger=ledger,
+        complete_fn=lambda model, messages: ChatResult(
+            text=(
+                "Draft ready. I will keep outbound work gated.\n"
+                'APPROVAL_REQUIRED: {"tool":"email","action":"send_email",'
+                '"summary":"Send the prepared demo email","payload":{"draft":"Demo draft"}}'
+            ),
+            model=model,
+            prompt_tokens=sum(len(str(m.get("content", ""))) for m in messages),
+            completion_tokens=24,
+            cost_usd=0.0,
+        ),
+    )
 
     # A handful of receipts so the cost meter has something to add up.
     for c in (0.0012, 0.0034, 0.0009, 0.0021):
@@ -77,6 +95,8 @@ def build_demo_deps() -> DashboardDeps:
         memory=memory,
         providers=provider_manager,
         settings_store=settings_store,
+        router=router,
+        sentinel=Sentinel(PolicyConfig()),
         sessions=Sessions(SessionConfig(owner_id="owner", secret_key=generate_secret_key())),
         login_token=token,
         allowed_hosts={f"{_HOST}:{_PORT}", "localhost:" + str(_PORT)},

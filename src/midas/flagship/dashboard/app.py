@@ -14,6 +14,8 @@ tests can mount it without starting a server.
 
 from __future__ import annotations
 
+import json
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,7 +26,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from midas.core.approvals import ApprovalError, ApprovalQueue
+from midas.core.budget import BudgetExceeded
 from midas.core.receipts.models import Decision
+from midas.flagship.chat import run_chat
 from midas.flagship.outcomes import Outcome, ingest_outcome
 
 from .auth import LoginToken, Sessions
@@ -75,6 +79,8 @@ class DashboardDeps:
     providers: Any = None  # ProviderManager for keychain-backed provider setup
     settings_store: Any = None  # SettingsStore for local dashboard settings
     router: Any = None  # LLMRouter for optional live provider tests
+    sentinel: Any = None  # Sentinel gate for chat-proposed approval cards
+    chat_est_usd: float = 0.02
     sse_interval_seconds: float = 1.5  # tests can shorten via deps; UI default is 1.5s
 
 
@@ -368,6 +374,74 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         )
         return _json(200, {"ok": True, "settings": settings_json})
 
+    @app.post("/api/chat")
+    async def api_chat(request: Request) -> Any:
+        _require_session(request)
+        if deps.router is None or deps.sentinel is None:
+            return _json(503, {"error": "chat disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            message = str(body.get("message") or "").strip()
+            history = body.get("history") if isinstance(body.get("history"), list) else []
+            if not message:
+                return _json(400, {"error": "message required"})
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+
+        from starlette.responses import StreamingResponse
+
+        run_id = f"chat:{uuid.uuid4().hex[:12]}"
+
+        async def gen():
+            yield _sse("start", {"run_id": run_id})
+            try:
+                bundle = run_chat(
+                    message=message,
+                    history=history,
+                    router=deps.router,
+                    sentinel=deps.sentinel,
+                    approvals=deps.queue,
+                    ledger=deps.ledger,
+                    run_id=run_id,
+                    est_usd=deps.chat_est_usd,
+                )
+            except BudgetExceeded as exc:
+                yield _sse(
+                    "error",
+                    {
+                        "code": "budget_exceeded",
+                        "scope": exc.scope,
+                        "projected": round(exc.projected, 6),
+                        "cap": round(exc.cap, 6),
+                    },
+                )
+                return
+            except Exception:
+                yield _sse("error", {"code": "chat_failed"})
+                return
+
+            for chunk in _text_chunks(bundle.text):
+                yield _sse("delta", {"text": chunk})
+            if bundle.approval is not None:
+                yield _sse("approval", bundle.approval.to_json())
+            yield _sse(
+                "done",
+                {
+                    "run_id": bundle.run_id,
+                    "proof_level": bundle.proof_level,
+                    "sources": bundle.sources,
+                    "cost_usd": round(bundle.cost_usd, 6),
+                },
+            )
+
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"},
+        )
+
     @app.get("/events")
     async def events(request: Request) -> Any:
         # Owner-gated SSE. The stream is no-cache and Content-Type text/event-stream,
@@ -518,8 +592,18 @@ def _receipt(
     )
 
 
+def _sse(event: str, body: dict[str, Any]) -> str:
+    payload = json.dumps(body, separators=(",", ":"), ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+def _text_chunks(text: str, *, size: int = 160) -> list[str]:
+    if not text:
+        return []
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
 def _json(code: int, body: dict) -> Response:
-    import json
     return Response(
         content=json.dumps(body), status_code=code, media_type="application/json"
     )
