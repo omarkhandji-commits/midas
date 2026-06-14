@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "midas"
+version = "0.0.1"
+description = "MIDAS — autonomous revenue operator: the business agent you can trust (receipts + budget fuse + sentinel)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "MIDAS" }]
+keywords = ["ai-agent", "autonomous-agent", "llm", "business", "self-hosted"]
+
+# Core runtime deps (lean — heavy/optional pieces live in extras below).
+dependencies = [
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "pynacl>=1.5",
+    "keyring>=24",
+    "httpx>=0.27",
+    "PyYAML>=6",
+    "typer>=0.12",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+llm = ["litellm>=1.40", "instructor>=1.3"]
+memory = ["sqlite-vec>=0.1.1", "fastembed>=0.3"]
+web = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "sse-starlette>=2.1", "python-multipart>=0.0.9"]
+telegram = ["python-telegram-bot>=21"]
+obs = ["opentelemetry-sdk>=1.25"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
+    "respx>=0.21",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "import-linter>=2.0",
+]
+
+[project.scripts]
+midas = "midas.flagship.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/midas"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+ignore_missing_imports = true
+
+# Architectural contract: the general core must never import the flagship.
+[tool.importlinter]
+root_package = "midas"
+
+[[tool.importlinter.contracts]]
+name = "core must not depend on flagship"
+type = "forbidden"
+source_modules = ["midas.core"]
+forbidden_modules = ["midas.flagship"]

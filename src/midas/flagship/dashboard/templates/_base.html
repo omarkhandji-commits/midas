@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>{% block title %}MIDAS{% endblock %}</title>
+  <link rel="stylesheet" href="/static/dashboard.css" />
+</head>
+<body>
+  <header class="m-hdr">
+    <div class="m-hdr__brand">MIDAS</div>
+    <div class="m-hdr__meta">{% block meta %}{% endblock %}</div>
+  </header>
+  <main class="m-main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="m-ftr">
+    Local dashboard · loopback only · no telemetry · drafts not sent
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

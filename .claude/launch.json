@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "midas-dashboard",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "midas.flagship.dashboard"],
+      "port": 8765,
+      "env": { "MIDAS_DEMO": "1" }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+# MIDAS — Provider-agnostic LLM routing (example)
+# Copy to providers.yml (gitignored) and fill. MIDAS works with ANY LLM API.
+# Designed for a LiteLLM-style router: cheap model for volume, smart model for stakes.
+
+# ── Model roles ──
+roles:
+  cheap:                       # high-volume, low-stakes (scan, score, draft)
+    primary: ollama/llama3.1   # local, free
+    fallbacks:
+      - groq/llama-3.1-8b      # free tier, fast
+      - mistral/mistral-small
+  smart:                       # high-stakes only (final pick, customer copy, irreversible)
+    primary: anthropic/claude-sonnet
+    fallbacks:
+      - openai/gpt-4.1
+      - together/Nous-Hermes   # open "Hermes" family
+
+# ── Providers (keys come from .env, never hard-coded here) ──
+providers:
+  openai:
+    api_key_env: OPENAI_API_KEY
+  anthropic:
+    api_key_env: ANTHROPIC_API_KEY
+  mistral:
+    api_key_env: MISTRAL_API_KEY
+  groq:
+    api_key_env: GROQ_API_KEY
+  together:                    # Nous/Hermes and other open models
+    api_key_env: TOGETHER_API_KEY
+  ollama:                      # local, no key
+    base_url_env: OLLAMA_BASE_URL
+
+# ── Routing rules ──
+routing:
+  default_role: cheap
+  escalate_to_smart:
+    - final_project_selection
+    - customer_facing_copy
+    - irreversible_plan_review
+  retry_on_failure: true
+  max_retries: 2
+  # Hard cost ceiling enforced by the router itself (mirrors policy.yml spend_caps)
+  enforce_spend_caps: true

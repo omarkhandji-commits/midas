@@ -1,0 +1,306 @@
+/* MIDAS dashboard — local-only, self-served. No CDN, no framework. */
+
+:root {
+  /* Restrained palette. The DATA is the design. */
+  --ink:        #0c0c0d;
+  --paper:      #fafaf7;
+  --rule:       #d8d6cf;
+  --rule-soft:  #ebe8e0;
+  --mute:       #6c6a62;
+  --accent:     #2a4d3a;   /* the only accent — Proof-First green */
+  --accent-hi:  #345d47;
+  --warn:       #7a3417;
+  --warn-hi:    #94401e;
+  --ok-bg:      #eaf0ec;
+  --warn-bg:    #f2e9e5;
+  --shadow:     none;
+
+  /* Typography. Pro stacks, sized on a 4px grid. */
+  --f-ui:       ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --f-mono:     ui-monospace, "JetBrains Mono", SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --f-display:  "EB Garamond", "Iowan Old Style", Georgia, serif;
+
+  --r:          0;         /* No rounded corners. Sharp by intention. */
+  --pad:        16px;
+  --maxw:       1180px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink:       #f0eee6;
+    --paper:     #0d0e10;
+    --rule:      #2a2b2e;
+    --rule-soft: #1c1d20;
+    --mute:      #8a887e;
+    --accent:    #79b691;
+    --accent-hi: #94c8a8;
+    --warn:      #d18760;
+    --warn-hi:   #df9e7c;
+    --ok-bg:     #142019;
+    --warn-bg:   #221913;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-ui);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── header ────────────────────────────────────────────────────────────── */
+.m-hdr {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 32px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.m-hdr__brand {
+  font-family: var(--f-display);
+  font-size: 22px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+.m-hdr__meta {
+  display: flex;
+  gap: 22px;
+  font-family: var(--f-mono);
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.m-meta__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.m-meta__label { text-transform: uppercase; letter-spacing: 0.08em; }
+.m-meta__val   { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.m-meta__item--ok .m-meta__val {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── main / sections ──────────────────────────────────────────────────── */
+.m-main {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 32px 32px 64px;
+}
+
+.m-section { margin-bottom: 48px; }
+
+.m-section__head {
+  border-bottom: 1px solid var(--rule-soft);
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+}
+
+.m-section__title {
+  font-family: var(--f-display);
+  font-size: 28px;
+  font-weight: 500;
+  margin: 0 0 4px;
+  letter-spacing: -0.005em;
+}
+
+.m-section__lede {
+  margin: 0;
+  color: var(--mute);
+  max-width: 64ch;
+}
+
+/* ── table ────────────────────────────────────────────────────────────── */
+.m-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.m-table th,
+.m-table td {
+  padding: 12px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule-soft);
+  vertical-align: top;
+}
+
+.m-table th {
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mute);
+  border-bottom: 1px solid var(--rule);
+}
+
+.m-table tbody tr:hover { background: var(--rule-soft); }
+
+.m-table__sum { color: var(--ink); }
+
+.m-table__act { text-align: right; white-space: nowrap; }
+
+.m-id {
+  font-family: var(--f-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--mute);
+}
+
+.m-code {
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+  background: var(--rule-soft);
+  padding: 1px 6px;
+  border: 1px solid var(--rule);
+}
+
+/* ── buttons ──────────────────────────────────────────────────────────── */
+.m-btn {
+  font-family: var(--f-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 6px 14px;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 80ms linear, color 80ms linear;
+}
+
+.m-btn + .m-btn { margin-left: 6px; }
+
+.m-btn:hover { background: var(--ink); color: var(--paper); }
+
+.m-btn--primary {
+  background: var(--accent);
+  color: var(--paper);
+  border-color: var(--accent);
+}
+.m-btn--primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); color: var(--paper); }
+
+.m-btn--ok {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.m-btn--ok:hover { background: var(--accent); color: var(--paper); }
+
+.m-btn--no {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.m-btn--no:hover { background: var(--warn); color: var(--paper); }
+
+.m-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* ── login ────────────────────────────────────────────────────────────── */
+.m-login {
+  max-width: 480px;
+  margin: 64px auto;
+  padding: 32px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+.m-login__head {
+  font-family: var(--f-display);
+  font-size: 26px;
+  font-weight: 500;
+  margin: 0 0 12px;
+}
+.m-login__lede   { color: var(--mute); margin: 0 0 24px; }
+.m-login__form   { display: grid; gap: 10px; }
+.m-login__label  {
+  font-size: 11px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--mute);
+}
+.m-login__input {
+  font-family: var(--f-mono);
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  outline-offset: 2px;
+}
+.m-login__input:focus { outline: 2px solid var(--accent); }
+.m-login__help { color: var(--mute); font-size: 12.5px; margin: 8px 0 0; }
+
+/* ── misc ─────────────────────────────────────────────────────────────── */
+.m-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--mute);
+  border: 1px dashed var(--rule);
+}
+
+.m-disclaimer {
+  margin-top: 48px;
+  padding: 14px 18px;
+  border-left: 2px solid var(--accent);
+  background: var(--ok-bg);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.m-ftr {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 24px 32px 40px;
+  border-top: 1px solid var(--rule-soft);
+  color: var(--mute);
+  font-size: 12px;
+}
+
+/* Tabular numbers everywhere a number lives. */
+time, .m-id, .m-meta__val, .m-code { font-variant-numeric: tabular-nums; }
+
+/* Visible focus ring — pro accessibility, not a generic blue blob. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── proof badge ──────────────────────────────────────────────────────── */
+.m-proof {
+  display: inline-block;
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border: 1px solid currentColor;
+}
+.m-proof--high   { color: var(--accent); }
+.m-proof--medium { color: var(--ink); opacity: 0.85; }
+.m-proof--low    { color: var(--warn); }
+
+/* Subtle live-pulse on the meta numbers when SSE pushes a new value.
+   No bouncy motion — just a sober color flash that resolves in 600ms. */
+@keyframes m-pulse {
+  0%   { background: transparent; }
+  20%  { background: var(--ok-bg); }
+  100% { background: transparent; }
+}
+.m-meta__val.is-live { animation: m-pulse 600ms ease-out; }
+
+/* Inline status line for resolve errors — never a toast, never a modal. */
+.m-row-err {
+  color: var(--warn);
+  font-family: var(--f-mono);
+  font-size: 12px;
+  margin-right: 8px;
+}

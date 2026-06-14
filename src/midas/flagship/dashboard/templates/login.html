@@ -1,0 +1,22 @@
+{% extends "_base.html" %}
+{% block title %}MIDAS · sign in{% endblock %}
+{% block content %}
+<section class="m-login">
+  <h1 class="m-login__head">Authenticate this session.</h1>
+  <p class="m-login__lede">
+    Paste the one-time token printed in your terminal. It is consumed on use;
+    a new token is generated each time MIDAS starts.
+  </p>
+  <form class="m-login__form" method="post" action="/login" autocomplete="off">
+    <label class="m-login__label" for="token">One-time token</label>
+    <input class="m-login__input" id="token" name="token"
+           type="password" required autofocus
+           spellcheck="false" autocapitalize="off" autocorrect="off"
+           aria-describedby="login-help" />
+    <button class="m-btn m-btn--primary" type="submit">Sign in</button>
+    <p id="login-help" class="m-login__help">
+      MIDAS never stores a password. The token is the only credential.
+    </p>
+  </form>
+</section>
+{% endblock %}

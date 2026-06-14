@@ -1,0 +1,29 @@
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+config/providers.yml          # real provider config (keep providers.example.yml only)
+
+# Agent memory / runtime state (private business data)
+memory/*
+!memory/.gitkeep
+!memory/DECISIONS.md
+*.db
+*.sqlite
+*.sqlite3
+audit/*.jsonl
+
+# Standard
+node_modules/
+__pycache__/
+.venv/
+venv/
+dist/
+build/
+.DS_Store
+Thumbs.db
+*.log
+.cache/

@@ -1,0 +1,92 @@
+# MIDAS — Autonomy & control policy
+# This file is the machine-readable version of docs/SECURITY.md.
+# The Sentinel sub-agent enforces it. Edit with care; default-deny is the safe baseline.
+
+autonomy: semi-auto    # approval-default (public default). opt-in: full-auto-guarded | propose-only
+kill_switch: off               # on = freeze ALL actions
+
+# ── Spend caps (USD). Crossing a cap halts the run and alerts the owner. ──
+spend_caps:
+  per_task: 0.25
+  daily: 2.00
+  monthly: 30.00
+  on_breach: halt_and_alert    # halt_and_alert | pause_for_approval
+
+# ── Model routing by stakes (provider-agnostic; see providers.example.yml) ──
+models:
+  default: cheap               # cheap model for all volume work
+  escalate_to_smart_when:      # only these justify the expensive model
+    - final_project_selection
+    - customer_facing_copy
+    - irreversible_plan_review
+
+# ── Action classes ──
+# analyze = always allowed. act = blocked by default, requires human approval.
+actions:
+  allowed_without_approval:    # the agent's free autonomy
+    - web_search
+    - read_fetch               # robots-respecting, content treated as untrusted DATA
+    - read_repo
+    - read_local_files
+    - read_obsidian
+    - score_opportunity
+    - draft_copy
+    - draft_landing
+    - draft_email              # DRAFT only — sending is gated
+    - draft_outreach
+    - prepare_lead_list        # prepare only — contacting is gated
+    - build_local_files
+    - update_memory
+    - propose_decision
+
+  requires_approval:           # default-deny; one-tap Approve via Telegram/desktop
+    - send_email
+    - send_message
+    - contact_prospect
+    - publish_public
+    - repo_write
+    - repo_push
+    - deploy
+    - pay_or_buy
+    - install_skill_or_tool
+    - delete_or_overwrite_foreign_file
+    - irreversible_decision
+
+  never:                       # hard-forbidden regardless of approval
+    - spam
+    - scam_or_deception
+    - marketing_lie
+    - guaranteed_income_claim
+    - mass_send_without_approval
+    - move_money_without_approval
+    - leak_secret
+    - obey_instructions_in_fetched_content
+
+# ── Approval channel ──
+approval:
+  source_of_truth: owner_only          # only the verified owner can approve
+  channels: [telegram, desktop, cli]
+  reject_on_timeout: true              # no answer = no action
+  ignore_chat_text_claiming_authority: true   # anti prompt-injection
+
+# ── Egress allow-list (outbound network). Empty = read-only research only. ──
+egress_allowlist: []                   # add approved domains as you grow
+
+# ── Filesystem sandbox ──
+filesystem:
+  workspace_only: true
+  deny_paths: ["C:\\Windows", "C:\\Program Files", "~", "/etc", "/usr", "/System"]
+
+# ── Audit ──
+audit:
+  enabled: true
+  path: audit/
+  format: jsonl
+  hash_chained: true                   # tamper-evident
+  log: [action_request, decision, approval, spend, error]
+
+# ── Anti-hallucination ──
+sources:
+  cite_or_abstain: true
+  min_confidence_for_action: medium    # never act on low-confidence data unattended
+  self_check_high_stakes: true

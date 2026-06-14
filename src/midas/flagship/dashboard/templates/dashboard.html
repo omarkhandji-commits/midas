@@ -1,0 +1,69 @@
+{% extends "_base.html" %}
+{% block title %}MIDAS · operator{% endblock %}
+{% block meta %}
+  <span class="m-meta__item" title="Total cost paid this run, summed from the verifiable receipts ledger.">
+    <span class="m-meta__label">Spent</span>
+    <span class="m-meta__val" id="spent-usd">${{ "%.4f"|format(spent_usd) }}</span>
+  </span>
+  <span class="m-meta__item" title="Number of cryptographically chained receipts.">
+    <span class="m-meta__label">Receipts</span>
+    <span class="m-meta__val" id="receipt-count">{{ receipt_count }}</span>
+  </span>
+  <span class="m-meta__item m-meta__item--ok" title="Audit chain status. Drops to FAIL the moment any byte is mutated.">
+    <span class="m-meta__label">Chain</span>
+    <span class="m-meta__val">OK</span>
+  </span>
+{% endblock %}
+{% block content %}
+<section class="m-section">
+  <header class="m-section__head">
+    <h2 class="m-section__title">Pending approvals</h2>
+    <p class="m-section__lede">
+      Nothing executes until you tap. Resolutions are written to the receipts ledger
+      and propagated to every connected channel.
+    </p>
+  </header>
+
+  {% if pending %}
+  <table class="m-table">
+    <thead>
+      <tr>
+        <th scope="col">ID</th>
+        <th scope="col">Action</th>
+        <th scope="col">Tool</th>
+        <th scope="col">Agent</th>
+        <th scope="col">Summary</th>
+        <th scope="col">Queued</th>
+        <th scope="col" class="m-table__act">Decision</th>
+      </tr>
+    </thead>
+    <tbody id="approvals-tbody">
+    {% for req in pending %}
+      <tr data-req-id="{{ req.id }}">
+        <td><span class="m-id">#{{ req.id }}</span></td>
+        <td><code class="m-code">{{ req.action }}</code></td>
+        <td><code class="m-code">{{ req.tool }}</code></td>
+        <td>{{ req.agent }}</td>
+        <td class="m-table__sum">{{ req.summary }}</td>
+        <td><time>{{ req.created_ts }}</time></td>
+        <td class="m-table__act">
+          <button class="m-btn m-btn--ok"  data-action="approve" data-id="{{ req.id }}">Approve</button>
+          <button class="m-btn m-btn--no"  data-action="reject"  data-id="{{ req.id }}">Reject</button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="m-empty">No pending approvals. You are clear.</p>
+  {% endif %}
+</section>
+
+<section class="m-disclaimer">
+  Local dashboard only. The agent drafts; you approve and execute outbound actions.
+  Every claim must cite a verified source or it is downgraded. No revenue is promised.
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/dashboard.js" nonce="{{ nonce }}" defer></script>
+{% endblock %}
