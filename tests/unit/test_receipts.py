@@ -92,7 +92,10 @@ def test_reopen_continues_chain() -> None:
 
 
 @settings(max_examples=40, deadline=None)
-@given(target=st.integers(min_value=0, max_value=4), field=st.sampled_from(["agent", "tool", "run_id"]))
+@given(
+    target=st.integers(min_value=0, max_value=4),
+    field=st.sampled_from(["agent", "tool", "run_id"]),
+)
 def test_property_any_field_tamper_detected(target: int, field: str) -> None:
     signer = _signer()
     path = Path(tempfile.mkdtemp()) / "receipts.jsonl"

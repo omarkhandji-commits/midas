@@ -6,7 +6,8 @@ The actual provider call is a pluggable `complete_fn(model, messages) -> ChatRes
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from midas.core.config.models import ProvidersConfig
 from midas.core.receipts.models import Decision
@@ -37,7 +38,7 @@ def _default_litellm_complete(model: str, messages: Messages) -> ChatResult:
     pt = getattr(usage, "prompt_tokens", 0) if usage else 0
     ct = getattr(usage, "completion_tokens", 0) if usage else 0
     try:
-        cost: Optional[float] = float(litellm.completion_cost(completion_response=resp))
+        cost: float | None = float(litellm.completion_cost(completion_response=resp))
     except Exception:
         cost = None
     return ChatResult(text=text, model=model, prompt_tokens=pt, completion_tokens=ct, cost_usd=cost)
@@ -50,8 +51,8 @@ class LLMRouter:
         *,
         fuse: Any = None,  # core.budget.BudgetFuse (optional)
         ledger: Any = None,  # core.receipts.ReceiptLedger (optional)
-        complete_fn: Optional[CompleteFn] = None,
-        cost_fn: Optional[CostFn] = None,
+        complete_fn: CompleteFn | None = None,
+        cost_fn: CostFn | None = None,
     ) -> None:
         self.providers = providers
         self.fuse = fuse
@@ -71,33 +72,47 @@ class LLMRouter:
         *,
         role: str = "cheap",
         escalate: bool = False,
-        task_id: Optional[str] = None,
-        run_id: Optional[str] = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
         est_usd: float = 0.0,
         agent: str = "router",
     ) -> ChatResult:
         models = self._models_for_role("smart" if escalate else role)
-        return self._run(models, messages, task_id=task_id, run_id=run_id, est_usd=est_usd, agent=agent)
+        return self._run(
+            models,
+            messages,
+            task_id=task_id,
+            run_id=run_id,
+            est_usd=est_usd,
+            agent=agent,
+        )
 
     def complete_model(
         self,
         model: str,
         messages: Messages,
         *,
-        task_id: Optional[str] = None,
-        run_id: Optional[str] = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
         est_usd: float = 0.0,
         agent: str = "router",
     ) -> ChatResult:
-        return self._run([model], messages, task_id=task_id, run_id=run_id, est_usd=est_usd, agent=agent)
+        return self._run(
+            [model],
+            messages,
+            task_id=task_id,
+            run_id=run_id,
+            est_usd=est_usd,
+            agent=agent,
+        )
 
     def _run(
         self,
         models: list[str],
         messages: Messages,
         *,
-        task_id: Optional[str],
-        run_id: Optional[str],
+        task_id: str | None,
+        run_id: str | None,
         est_usd: float,
         agent: str,
     ) -> ChatResult:
@@ -105,7 +120,7 @@ class LLMRouter:
         if self.fuse is not None:
             self.fuse.check(est_usd, task_id=task_id)
 
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
         for model in models:
             try:
                 res = self._complete_fn(model, messages)
@@ -113,10 +128,18 @@ class LLMRouter:
                 last_exc = exc
                 continue
             if res.cost_usd is None:
-                res.cost_usd = self._cost_fn(res.model or model, res.prompt_tokens, res.completion_tokens)
+                res.cost_usd = self._cost_fn(
+                    res.model or model,
+                    res.prompt_tokens,
+                    res.completion_tokens,
+                )
             if self.fuse is not None:
                 self.fuse.commit(
-                    res.cost_usd, run_id=run_id, task_id=task_id, kind="llm", model=res.model or model
+                    res.cost_usd,
+                    run_id=run_id,
+                    task_id=task_id,
+                    kind="llm",
+                    model=res.model or model,
                 )
             if self.ledger is not None:
                 self.ledger.append(

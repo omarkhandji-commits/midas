@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -34,7 +33,7 @@ class HardGates(BaseModel):
     no_distribution_channel: bool = False
 
 
-class Band(str, Enum):
+class Band(StrEnum):
     BUILD = "BUILD"
     WATCHLIST = "WATCHLIST"
     ARCHIVE = "ARCHIVE"
@@ -46,4 +45,4 @@ class ScoreBreakdown:
     band: Band
     contributions: dict[str, float]
     weakest_factor: str
-    archived_by_gate: Optional[str] = None
+    archived_by_gate: str | None = None

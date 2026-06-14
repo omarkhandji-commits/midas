@@ -19,11 +19,11 @@ class Signer:
         self._vk = signing_key.verify_key
 
     @classmethod
-    def generate(cls) -> "Signer":
+    def generate(cls) -> Signer:
         return cls(signing.SigningKey.generate())
 
     @classmethod
-    def from_hex_seed(cls, seed_hex: str) -> "Signer":
+    def from_hex_seed(cls, seed_hex: str) -> Signer:
         return cls(signing.SigningKey(seed_hex, encoder=encoding.HexEncoder))
 
     @property

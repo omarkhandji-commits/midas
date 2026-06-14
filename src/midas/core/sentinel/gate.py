@@ -11,8 +11,6 @@ Order of checks (fail-closed):
 
 from __future__ import annotations
 
-from typing import Optional
-
 from midas.core.config.models import PolicyConfig
 from midas.core.receipts.models import Decision
 
@@ -24,7 +22,7 @@ from .trifecta import is_lethal_trifecta
 
 
 class Sentinel:
-    def __init__(self, policy: PolicyConfig, kill_switch: Optional[KillSwitch] = None) -> None:
+    def __init__(self, policy: PolicyConfig, kill_switch: KillSwitch | None = None) -> None:
         self.policy = policy
         self.kill = kill_switch or KillSwitch(policy.kill_switch)
 

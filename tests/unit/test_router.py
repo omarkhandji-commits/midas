@@ -57,7 +57,10 @@ def test_all_models_fail_raises() -> None:
 
 
 def test_budget_blocks_before_call(tmp_path: Path) -> None:
-    fuse = BudgetFuse(SpendStore(tmp_path / "s.db"), Caps(per_task=0.001, daily=0.001, monthly=0.001))
+    fuse = BudgetFuse(
+        SpendStore(tmp_path / "s.db"),
+        Caps(per_task=0.001, daily=0.001, monthly=0.001),
+    )
     r = LLMRouter(_providers(), fuse=fuse, complete_fn=_fake({"ollama/llama3.1": "x"}))
     with pytest.raises(BudgetExceeded):
         r.complete(MSG, role="cheap", est_usd=0.05, task_id="t1")

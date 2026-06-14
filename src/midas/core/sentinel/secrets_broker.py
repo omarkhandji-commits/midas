@@ -32,7 +32,7 @@ class SecretsBroker:
     def resolve(self, text: str) -> str:
         """Substitute real secret values. Call ONLY at the trusted network boundary."""
 
-        def _sub(m: "re.Match[str]") -> str:
+        def _sub(m: re.Match[str]) -> str:
             handle = m.group(1)
             if handle not in self._store:
                 raise KeyError(f"unknown secret handle: {handle}")

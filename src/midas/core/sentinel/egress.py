@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 
 def domain_allowed(domain: str, allowlist: Iterable[str]) -> bool:
@@ -16,7 +16,7 @@ def domain_allowed(domain: str, allowlist: Iterable[str]) -> bool:
     return False
 
 
-def first_blocked_domain(domains: Iterable[str], allowlist: Iterable[str]) -> Optional[str]:
+def first_blocked_domain(domains: Iterable[str], allowlist: Iterable[str]) -> str | None:
     allow = list(allowlist)
     for d in domains:
         if not domain_allowed(d, allow):

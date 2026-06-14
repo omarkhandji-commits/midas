@@ -8,8 +8,7 @@ never executes. Actual cost is committed afterwards. A surprise bill is impossib
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from .store import SpendStore
 
@@ -32,12 +31,12 @@ class Caps:
 
 
 def _start_of_day_iso() -> str:
-    n = datetime.now(timezone.utc)
+    n = datetime.now(UTC)
     return n.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
 
 def _start_of_month_iso() -> str:
-    n = datetime.now(timezone.utc)
+    n = datetime.now(UTC)
     return n.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
 
 
@@ -46,7 +45,7 @@ class BudgetFuse:
         self.store = store
         self.caps = caps
 
-    def check(self, est_usd: float, *, task_id: Optional[str] = None) -> None:
+    def check(self, est_usd: float, *, task_id: str | None = None) -> None:
         """Raise BudgetExceeded if committing `est_usd` now would breach any cap."""
         if task_id is not None:
             projected = self.store.total(task_id=task_id) + est_usd
@@ -63,10 +62,10 @@ class BudgetFuse:
         self,
         usd: float,
         *,
-        run_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-        kind: Optional[str] = None,
-        model: Optional[str] = None,
+        run_id: str | None = None,
+        task_id: str | None = None,
+        kind: str | None = None,
+        model: str | None = None,
     ) -> None:
         self.store.record(usd, run_id=run_id, task_id=task_id, kind=kind, model=model)
 
@@ -74,11 +73,11 @@ class BudgetFuse:
         self,
         est_usd: float,
         *,
-        task_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        kind: Optional[str] = None,
-        model: Optional[str] = None,
-    ) -> "_Guard":
+        task_id: str | None = None,
+        run_id: str | None = None,
+        kind: str | None = None,
+        model: str | None = None,
+    ) -> _Guard:
         return _Guard(self, est_usd, task_id, run_id, kind, model)
 
 
@@ -89,10 +88,10 @@ class _Guard:
         self,
         fuse: BudgetFuse,
         est: float,
-        task_id: Optional[str],
-        run_id: Optional[str],
-        kind: Optional[str],
-        model: Optional[str],
+        task_id: str | None,
+        run_id: str | None,
+        kind: str | None,
+        model: str | None,
     ) -> None:
         self._fuse = fuse
         self._est = est
@@ -100,9 +99,9 @@ class _Guard:
         self._run_id = run_id
         self._kind = kind
         self._model = model
-        self._actual: Optional[float] = None
+        self._actual: float | None = None
 
-    def __enter__(self) -> "_Guard":
+    def __enter__(self) -> _Guard:
         self._fuse.check(self._est, task_id=self._task_id)
         return self
 

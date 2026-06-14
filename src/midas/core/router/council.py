@@ -8,8 +8,8 @@ calls `deliberate()` only for high-stakes/low-confidence decisions, within the b
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
 
 from .models import ChatResult
 from .router import LLMRouter, Messages
@@ -47,20 +47,28 @@ class Council:
         self,
         messages: Messages,
         *,
-        task_id: Optional[str] = None,
-        run_id: Optional[str] = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
         est_usd_each: float = 0.0,
-        similarity_fn: Optional[SimilarityFn] = None,
+        similarity_fn: SimilarityFn | None = None,
     ) -> CouncilResult:
         answers = [
             self.router.complete_model(
-                m, messages, task_id=task_id, run_id=run_id, est_usd=est_usd_each, agent="council"
+                m,
+                messages,
+                task_id=task_id,
+                run_id=run_id,
+                est_usd=est_usd_each,
+                agent="council",
             )
             for m in self.members
         ]
         agreement = self._agreement(answers, similarity_fn or _exact_similarity)
 
-        synthesis_messages: Messages = [*messages, {"role": "user", "content": self._prompt(answers)}]
+        synthesis_messages: Messages = [
+            *messages,
+            {"role": "user", "content": self._prompt(answers)},
+        ]
         final = self.router.complete_model(
             self.chairman,
             synthesis_messages,

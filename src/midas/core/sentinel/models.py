@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from midas.core.receipts.models import Decision, Taint
 
 
-class Tier(str, Enum):
+class Tier(StrEnum):
     AUTO = "auto"  # reversible reads — run automatically
     NOTIFY = "notify"  # local writes — run, but notify
     APPROVE = "approve"  # irreversible / outbound — require human approval

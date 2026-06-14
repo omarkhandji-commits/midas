@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from .models import GENESIS_HASH, Receipt
 from .signer import Signer
@@ -14,8 +13,8 @@ from .signer import Signer
 class VerifyResult:
     ok: bool
     count: int
-    error: Optional[str] = None
-    bad_seq: Optional[int] = None
+    error: str | None = None
+    bad_seq: int | None = None
 
 
 def verify_chain(path: str | Path, public_key_hex: str) -> VerifyResult:

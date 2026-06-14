@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from .models import Band, FactorScores, HardGates, ScoreBreakdown
 from .weights import BUILD_MIN, WATCHLIST_MIN, WEIGHTS
 
@@ -15,7 +13,7 @@ _GATE_REASONS: dict[str, str] = {
 }
 
 
-def _failed_gate(gates: Optional[HardGates]) -> Optional[str]:
+def _failed_gate(gates: HardGates | None) -> str | None:
     if gates is None:
         return None
     for field_name, reason in _GATE_REASONS.items():
@@ -24,7 +22,7 @@ def _failed_gate(gates: Optional[HardGates]) -> Optional[str]:
     return None
 
 
-def score(factors: FactorScores, gates: Optional[HardGates] = None) -> ScoreBreakdown:
+def score(factors: FactorScores, gates: HardGates | None = None) -> ScoreBreakdown:
     contributions = {k: getattr(factors, k) / 10.0 * w for k, w in WEIGHTS.items()}
     total = round(sum(contributions.values()), 4)
 

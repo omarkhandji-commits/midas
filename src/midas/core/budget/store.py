@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS spend (
@@ -37,19 +36,19 @@ class SpendStore:
         self,
         usd: float,
         *,
-        run_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-        kind: Optional[str] = None,
-        model: Optional[str] = None,
+        run_id: str | None = None,
+        task_id: str | None = None,
+        kind: str | None = None,
+        model: str | None = None,
     ) -> None:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO spend(ts, run_id, task_id, kind, model, usd) VALUES (?,?,?,?,?,?)",
-                (datetime.now(timezone.utc).isoformat(), run_id, task_id, kind, model, usd),
+                (datetime.now(UTC).isoformat(), run_id, task_id, kind, model, usd),
             )
             self._conn.commit()
 
-    def total(self, *, since_iso: Optional[str] = None, task_id: Optional[str] = None) -> float:
+    def total(self, *, since_iso: str | None = None, task_id: str | None = None) -> float:
         query = "SELECT COALESCE(SUM(usd), 0) FROM spend WHERE 1=1"
         params: list[object] = []
         if since_iso is not None:

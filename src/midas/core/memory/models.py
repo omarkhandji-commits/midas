@@ -17,13 +17,13 @@ in place: an update writes a new row that *supersedes* the old one, so the histo
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from midas.core.agents.summary import ProofLevel
 from midas.core.receipts.models import utcnow_iso
 
 
-class MemoryKind(str, Enum):
+class MemoryKind(StrEnum):
     USER = "user"
     BUSINESS = "business"
     DECISION = "decision"

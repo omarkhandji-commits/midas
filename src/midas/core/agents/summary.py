@@ -11,10 +11,10 @@ that cannot be sourced is omitted, never invented.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class ProofLevel(str, Enum):
+class ProofLevel(StrEnum):
     """How well-evidenced a claim is. Shown on every finding (Proof-First)."""
 
     HIGH = "high"  # multiple independent, citable sources

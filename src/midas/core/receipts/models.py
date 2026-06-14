@@ -9,16 +9,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Optional
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel
 
 GENESIS_HASH = "0" * 64
 
 
-class Taint(str, Enum):
+class Taint(StrEnum):
     """Trust label that flows with every payload (drives the Sentinel trifecta rule)."""
 
     TRUSTED = "trusted"
@@ -26,14 +26,14 @@ class Taint(str, Enum):
     PRIVATE = "private"  # secrets, operator data, repo contents
 
 
-class Decision(str, Enum):
+class Decision(StrEnum):
     ALLOW = "allow"
     QUEUE_APPROVAL = "queue_approval"
     DENY = "deny"
 
 
 def utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def sha256_hex(data: bytes) -> str:
@@ -65,7 +65,7 @@ class ReceiptBody(BaseModel):
     cost_usd: float = 0.0
     taint_in: Taint = Taint.TRUSTED
     taint_out: Taint = Taint.TRUSTED
-    approval_id: Optional[str] = None
+    approval_id: str | None = None
 
     def canonical(self) -> str:
         return canonical_json(self.model_dump(mode="json"))

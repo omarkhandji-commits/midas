@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any
 
 from .models import (
     GENESIS_HASH,
@@ -55,7 +56,7 @@ class ReceiptLedger:
         cost_usd: float = 0.0,
         taint_in: Taint = Taint.TRUSTED,
         taint_out: Taint = Taint.TRUSTED,
-        approval_id: Optional[str] = None,
+        approval_id: str | None = None,
     ) -> Receipt:
         with self._lock:
             body = ReceiptBody(

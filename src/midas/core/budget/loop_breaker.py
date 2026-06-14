@@ -11,7 +11,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 class LoopBroken(Exception):
@@ -30,7 +30,7 @@ class LoopBreaker:
     _iter: int = 0
     _tokens: int = 0
     _start: float = field(default_factory=time.monotonic)
-    _last_state: Optional[str] = None
+    _last_state: str | None = None
     _no_progress: int = 0
 
     def tick(self, *, state: Any = None, tokens: int = 0) -> None:

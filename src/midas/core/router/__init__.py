@@ -1,7 +1,7 @@
 """Provider-agnostic LLM router + adaptive council."""
 
-from .council import Council, CouncilResult
 from .cost import estimate_cost
+from .council import Council, CouncilResult
 from .models import ChatResult
 from .router import LLMRouter, RouterError
 
