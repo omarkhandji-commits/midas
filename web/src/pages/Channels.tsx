@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { CheckCircle2, Plug, RefreshCw, Send, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
@@ -15,16 +15,55 @@ type ChannelStatus = {
   notes: string;
 };
 
+type Field = {
+  key: string;
+  label: string;
+  type?: "text" | "password" | "email" | "tel";
+  placeholder?: string;
+};
+
 type ChannelsResponse = { channels: ChannelStatus[] };
 type ChannelWriteResponse = { ok: boolean; channel: ChannelStatus };
 type ChannelTestResponse = { ok: boolean; channel: string; message: string; missing: string[] };
 
+const fieldSets: Record<string, Field[]> = {
+  telegram: [
+    { key: "bot_token", label: "Bot token", type: "password" },
+    { key: "owner_chat_id", label: "Owner chat ID" },
+  ],
+  discord: [
+    { key: "bot_token", label: "Bot token", type: "password" },
+    { key: "owner_user_id", label: "Owner user ID" },
+    { key: "guild_id", label: "Guild ID", placeholder: "optional" },
+  ],
+  slack: [
+    { key: "bot_token", label: "Bot token", type: "password" },
+    { key: "owner_user_id", label: "Owner user ID" },
+    { key: "signing_secret", label: "Signing secret", type: "password", placeholder: "optional" },
+  ],
+  whatsapp: [
+    { key: "access_token", label: "Access token", type: "password" },
+    { key: "owner_phone", label: "Owner phone", type: "tel" },
+    { key: "phone_number_id", label: "Phone number ID" },
+  ],
+  email: [
+    { key: "owner_email", label: "Owner email", type: "email" },
+    { key: "smtp_host", label: "SMTP host", placeholder: "optional, draft-only" },
+    { key: "smtp_user", label: "SMTP user", placeholder: "optional" },
+    { key: "smtp_pass", label: "SMTP password", type: "password", placeholder: "optional" },
+  ],
+  sms: [
+    { key: "account_sid", label: "Account SID" },
+    { key: "auth_token", label: "Auth token", type: "password" },
+    { key: "from_number", label: "From number", type: "tel" },
+    { key: "owner_phone", label: "Owner phone", type: "tel" },
+  ],
+};
+
 export function ChannelsPage() {
   const [channels, setChannels] = useState<ChannelStatus[]>([]);
   const [selected, setSelected] = useState("telegram");
-  const [botToken, setBotToken] = useState("");
-  const [ownerId, setOwnerId] = useState("");
-  const [extra, setExtra] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,21 +71,31 @@ export function ChannelsPage() {
   async function load() {
     const response = await api.get<ChannelsResponse>("/api/channels");
     setChannels(response.channels);
+    if (!response.channels.some((channel) => channel.name === selected) && response.channels[0]) {
+      setSelected(response.channels[0].name);
+    }
   }
 
   useEffect(() => {
     load().catch((err: unknown) => setError(readError(err)));
+    // Initial load only; selected is reconciled after the fetch resolves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const selectedChannel = useMemo(
+    () => channels.find((channel) => channel.name === selected),
+    [channels, selected],
+  );
+  const fields = fieldSets[selected] ?? [];
 
   async function connect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await run(async () => {
       const response = await api.post<ChannelWriteResponse>(
         `/api/channels/${selected}`,
-        channelBody(selected, botToken, ownerId, extra),
+        values,
       );
-      setBotToken("");
-      setExtra("");
+      setValues({});
       setNotice(`${response.channel.label} connected.`);
       await load();
     });
@@ -81,19 +130,18 @@ export function ChannelsPage() {
     }
   }
 
-  const selectedChannel = channels.find((channel) => channel.name === selected);
-  const ownerLabel = selected === "telegram" ? "Owner chat ID" : "Owner user ID";
-  const extraLabel = selected === "discord" ? "Guild ID" : "Signing secret";
-
   return (
-    <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
+    <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
       <Card className="p-6">
-          <CardHeader>
-            <CardKicker>Channel Hub</CardKicker>
+        <CardHeader>
+          <CardKicker>Channel Hub</CardKicker>
           <CardTitle>{selectedChannel?.label ?? "Channel"}</CardTitle>
-          </CardHeader>
+        </CardHeader>
         <CardBody>
-          <p>Owner-gated callbacks use the same ApprovalQueue as the dashboard.</p>
+          <p>
+            Owner-gated callbacks use the same ApprovalQueue as the dashboard. Email
+            remains draft-only; outbound messages require an approval card.
+          </p>
         </CardBody>
         <form className="mt-5 space-y-4" onSubmit={connect}>
           <label className="grid gap-1.5 text-sm font-medium">
@@ -101,7 +149,10 @@ export function ChannelsPage() {
             <select
               className={inputClasses}
               value={selected}
-              onChange={(event) => setSelected(event.target.value)}
+              onChange={(event) => {
+                setSelected(event.target.value);
+                setValues({});
+              }}
             >
               {channels.map((channel) => (
                 <option key={channel.name} value={channel.name}>
@@ -110,35 +161,23 @@ export function ChannelsPage() {
               ))}
             </select>
           </label>
-          <label className="grid gap-1.5 text-sm font-medium">
-            Bot token
-            <input
-              className={inputClasses}
-              type="password"
-              autoComplete="off"
-              value={botToken}
-              onChange={(event) => setBotToken(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1.5 text-sm font-medium">
-            {ownerLabel}
-            <input
-              className={inputClasses}
-              value={ownerId}
-              onChange={(event) => setOwnerId(event.target.value)}
-            />
-          </label>
-          {selected !== "telegram" && (
-            <label className="grid gap-1.5 text-sm font-medium">
-              {extraLabel}
+
+          {fields.map((field) => (
+            <label key={field.key} className="grid gap-1.5 text-sm font-medium">
+              {field.label}
               <input
                 className={inputClasses}
-                type={selected === "slack" ? "password" : "text"}
-                value={extra}
-                onChange={(event) => setExtra(event.target.value)}
+                type={field.type ?? "text"}
+                autoComplete="off"
+                value={values[field.key] ?? ""}
+                placeholder={field.placeholder}
+                onChange={(event) =>
+                  setValues((current) => ({ ...current, [field.key]: event.target.value }))
+                }
               />
             </label>
-          )}
+          ))}
+
           <div className="flex flex-wrap gap-2">
             <Button type="submit" variant="primary" disabled={busy}>
               <Plug className="size-4" aria-hidden />
@@ -178,7 +217,10 @@ export function ChannelsPage() {
                   <button
                     type="button"
                     className="text-base font-semibold hover:text-accent"
-                    onClick={() => setSelected(channel.name)}
+                    onClick={() => {
+                      setSelected(channel.name);
+                      setValues({});
+                    }}
                   >
                     {channel.label}
                   </button>
@@ -194,7 +236,10 @@ export function ChannelsPage() {
             </div>
             <div className="mt-4 grid gap-2 md:grid-cols-2">
               <Info label="Required" value={channel.required.join(", ")} />
-              <Info label="Missing" value={channel.missing.length ? channel.missing.join(", ") : "none"} />
+              <Info
+                label="Missing"
+                value={channel.missing.length ? channel.missing.join(", ") : "none"}
+              />
             </div>
           </Card>
         ))}
@@ -226,16 +271,6 @@ function Info({ label, value }: { label: string; value: string }) {
       <div className="mt-1 font-mono text-xs text-ink">{value}</div>
     </div>
   );
-}
-
-function channelBody(channel: string, botToken: string, ownerId: string, extra: string) {
-  if (channel === "telegram") {
-    return { bot_token: botToken, owner_chat_id: ownerId };
-  }
-  if (channel === "discord") {
-    return { bot_token: botToken, owner_user_id: ownerId, guild_id: extra };
-  }
-  return { bot_token: botToken, owner_user_id: ownerId, signing_secret: extra };
 }
 
 function StatusLine({ error, notice }: { error: string | null; notice: string | null }) {

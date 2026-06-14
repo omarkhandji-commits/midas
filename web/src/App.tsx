@@ -1,5 +1,6 @@
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { OnboardingPage } from "@/pages/Onboarding";
 import { ChatPage } from "@/pages/Chat";
 import { MissionsPage } from "@/pages/Missions";
 import { AssetsPage } from "@/pages/Assets";
@@ -21,6 +22,7 @@ const router = createBrowserRouter([
     path: "/",
     element: <AppShell />,
     children: [
+      { path: "start", element: <OnboardingPage /> },
       { index: true, element: <ChatPage /> },
       { path: "missions", element: <MissionsPage /> },
       { path: "assets", element: <AssetsPage /> },

@@ -11,10 +11,20 @@ from midas.core.receipts import ReceiptLedger, Signer
 from midas.flagship.channel_settings import (
     ChannelManager,
     DiscordInteractionHandler,
+    EmailReplyHandler,
     SlackActionHandler,
+    SMSReplyHandler,
     TelegramLongPollListener,
+    WhatsAppWebhookHandler,
 )
-from midas.flagship.channels import DiscordConfig, SlackConfig, TelegramConfig
+from midas.flagship.channels import (
+    DiscordConfig,
+    EmailConfig,
+    SlackConfig,
+    SMSConfig,
+    TelegramConfig,
+    WhatsAppConfig,
+)
 from midas.flagship.dashboard import (
     DashboardDeps,
     LoginToken,
@@ -108,6 +118,60 @@ def test_channels_api_stores_discord_and_slack_without_echoing_tokens(tmp_path: 
     assert client.post("/api/channels/slack/test", headers=headers).json()["ok"] is True
 
 
+def test_channels_api_stores_whatsapp_email_and_sms_without_echoing_secrets(
+    tmp_path: Path,
+) -> None:
+    client, token, _ledger = _client(tmp_path)
+    csrf = _sign_in(client, token)
+    headers = {"origin": "http://testserver", "x-midas-csrf": csrf}
+    whatsapp_secret = "whatsapp-token-never-echoed"
+    email_secret = "email-pass-never-echoed"
+    sms_secret = "sms-token-never-echoed"
+
+    whatsapp = client.post(
+        "/api/channels/whatsapp",
+        headers=headers,
+        json={
+            "access_token": whatsapp_secret,
+            "owner_phone": "+15550000001",
+            "phone_number_id": "wa-phone-id",
+        },
+    )
+    email = client.post(
+        "/api/channels/email",
+        headers=headers,
+        json={
+            "owner_email": "owner@example.com",
+            "smtp_host": "smtp.example.com",
+            "smtp_user": "owner",
+            "smtp_pass": email_secret,
+        },
+    )
+    sms = client.post(
+        "/api/channels/sms",
+        headers=headers,
+        json={
+            "account_sid": "AC123",
+            "auth_token": sms_secret,
+            "from_number": "+15550000002",
+            "owner_phone": "+15550000001",
+        },
+    )
+
+    assert whatsapp.status_code == 200
+    assert email.status_code == 200
+    assert sms.status_code == 200
+    listed = client.get("/api/channels").text
+    assert whatsapp_secret not in listed
+    assert email_secret not in listed
+    assert sms_secret not in listed
+    assert client.post("/api/channels/whatsapp/test", headers=headers).json()["ok"] is True
+    email_test = client.post("/api/channels/email/test", headers=headers).json()
+    assert email_test["ok"] is True
+    assert "draft-only" in email_test["message"]
+    assert client.post("/api/channels/sms/test", headers=headers).json()["ok"] is True
+
+
 def test_telegram_listener_delegates_callbacks_to_shared_queue(tmp_path: Path) -> None:
     queue = ApprovalQueue(tmp_path / "apv.db")
     req = queue.enqueue(run_id="r", agent="a", tool="email", action="send_email", summary="x")
@@ -155,3 +219,77 @@ def test_discord_and_slack_handlers_delegate_callbacks_to_shared_queue(tmp_path:
     assert "rejected" in slack_reply
     assert queue.get(discord_req.id).status.value == "approved"
     assert queue.get(slack_req.id).status.value == "rejected"
+
+
+def test_whatsapp_email_and_sms_handlers_delegate_to_shared_queue(tmp_path: Path) -> None:
+    queue = ApprovalQueue(tmp_path / "apv.db")
+    whatsapp_req = queue.enqueue(
+        run_id="r", agent="a", tool="message", action="send_message", summary="whatsapp"
+    )
+    email_req = queue.enqueue(
+        run_id="r", agent="a", tool="email", action="send_email", summary="email"
+    )
+    sms_req = queue.enqueue(
+        run_id="r", agent="a", tool="sms", action="send_message", summary="sms"
+    )
+    whatsapp = WhatsAppWebhookHandler(
+        config=WhatsAppConfig.make(
+            access_token="token",
+            owner_phone="+15550000001",
+            phone_number_id="phone-id",
+        ),
+        queue=queue,
+    )
+    email = EmailReplyHandler(
+        config=EmailConfig.make(owner_email="owner@example.com"),
+        queue=queue,
+    )
+    sms = SMSReplyHandler(
+        config=SMSConfig.make(
+            account_sid="AC123",
+            auth_token="token",
+            from_number="+15550000002",
+            owner_phone="+15550000001",
+        ),
+        queue=queue,
+    )
+
+    whatsapp_reply = whatsapp.handle_webhook(
+        {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "from": "+15550000001",
+                                        "interactive": {
+                                            "button_reply": {
+                                                "id": f"apv:approve:{whatsapp_req.id}"
+                                            }
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+    email_reply = email.handle_reply(
+        from_email="owner@example.com",
+        body=f"reject {email_req.id}\n\nquoted history",
+    )
+    sms_reply = sms.handle_message(
+        from_phone="+15550000001",
+        body=f"approve {sms_req.id}",
+    )
+
+    assert "approved" in whatsapp_reply
+    assert "rejected" in email_reply
+    assert "approved" in sms_reply
+    assert queue.get(whatsapp_req.id).status.value == "approved"
+    assert queue.get(email_req.id).status.value == "rejected"
+    assert queue.get(sms_req.id).status.value == "approved"

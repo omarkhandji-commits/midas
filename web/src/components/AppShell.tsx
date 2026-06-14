@@ -2,6 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
   MessageSquare,
+  ClipboardCheck,
   Compass,
   Wand2,
   Inbox,
@@ -25,6 +26,7 @@ const groups: NavGroup[] = [
   {
     label: "Work",
     items: [
+      { to: "/start", label: "Start", icon: ClipboardCheck },
       { to: "/", label: "Chat", icon: MessageSquare },
       { to: "/missions", label: "Missions", icon: Compass },
       { to: "/assets", label: "Asset Studio", icon: Wand2 },

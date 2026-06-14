@@ -15,10 +15,16 @@ import httpx
 from midas.flagship.channels import (
     DiscordBot,
     DiscordConfig,
+    EmailBot,
+    EmailConfig,
     SlackBot,
     SlackConfig,
+    SMSBot,
+    SMSConfig,
     TelegramBot,
     TelegramConfig,
+    WhatsAppBot,
+    WhatsAppConfig,
 )
 from midas.flagship.provider_settings import SecretVault
 
@@ -30,6 +36,17 @@ DISCORD_GUILD_ID = "DISCORD_GUILD_ID"
 SLACK_BOT_TOKEN = "SLACK_BOT_TOKEN"
 SLACK_OWNER_USER_ID = "SLACK_OWNER_USER_ID"
 SLACK_SIGNING_SECRET = "SLACK_SIGNING_SECRET"
+WHATSAPP_ACCESS_TOKEN = "WHATSAPP_ACCESS_TOKEN"
+WHATSAPP_OWNER_PHONE = "WHATSAPP_OWNER_PHONE"
+WHATSAPP_PHONE_NUMBER_ID = "WHATSAPP_PHONE_NUMBER_ID"
+EMAIL_OWNER_EMAIL = "EMAIL_OWNER_EMAIL"
+EMAIL_SMTP_HOST = "EMAIL_SMTP_HOST"
+EMAIL_SMTP_USER = "EMAIL_SMTP_USER"
+EMAIL_SMTP_PASS = "EMAIL_SMTP_PASS"
+SMS_ACCOUNT_SID = "SMS_ACCOUNT_SID"
+SMS_AUTH_TOKEN = "SMS_AUTH_TOKEN"
+SMS_FROM_NUMBER = "SMS_FROM_NUMBER"
+SMS_OWNER_PHONE = "SMS_OWNER_PHONE"
 
 
 @dataclass(frozen=True)
@@ -55,6 +72,9 @@ class ChannelManager:
             self.telegram_status().to_json(),
             self.discord_status().to_json(),
             self.slack_status().to_json(),
+            self.whatsapp_status().to_json(),
+            self.email_status().to_json(),
+            self.sms_status().to_json(),
         ]
 
     def telegram_status(self) -> ChannelStatus:
@@ -105,6 +125,44 @@ class ChannelManager:
             notes="Block Kit action bridge; owner-gated callbacks only.",
         )
 
+    def whatsapp_status(self) -> ChannelStatus:
+        required = [WHATSAPP_ACCESS_TOKEN, WHATSAPP_OWNER_PHONE, WHATSAPP_PHONE_NUMBER_ID]
+        missing = [handle for handle in required if not self.vault.get(handle)]
+        return ChannelStatus(
+            name="whatsapp",
+            label="WhatsApp",
+            connected=not missing,
+            live_listener=True,
+            required=required,
+            missing=missing,
+            notes="Cloud API approval buttons; outbound sends stay approval-gated.",
+        )
+
+    def email_status(self) -> ChannelStatus:
+        missing = [handle for handle in (EMAIL_OWNER_EMAIL,) if not self.vault.get(handle)]
+        return ChannelStatus(
+            name="email",
+            label="Email",
+            connected=not missing,
+            live_listener=True,
+            required=[EMAIL_OWNER_EMAIL],
+            missing=missing,
+            notes="Draft-only email approval bridge; no auto-send by default.",
+        )
+
+    def sms_status(self) -> ChannelStatus:
+        required = [SMS_ACCOUNT_SID, SMS_AUTH_TOKEN, SMS_FROM_NUMBER, SMS_OWNER_PHONE]
+        missing = [handle for handle in required if not self.vault.get(handle)]
+        return ChannelStatus(
+            name="sms",
+            label="SMS",
+            connected=not missing,
+            live_listener=True,
+            required=required,
+            missing=missing,
+            notes="Twilio-style approval replies; outbound SMS remains approval-gated.",
+        )
+
     def connect_telegram(self, *, bot_token: str, owner_chat_id: str) -> ChannelStatus:
         if not bot_token.strip():
             raise ValueError("bot_token required")
@@ -153,6 +211,68 @@ class ChannelManager:
         self.vault.delete(SLACK_SIGNING_SECRET)
         return self.slack_status()
 
+    def connect_whatsapp(
+        self, *, access_token: str, owner_phone: str, phone_number_id: str
+    ) -> ChannelStatus:
+        self._require(access_token, "access_token")
+        self._require(owner_phone, "owner_phone")
+        self._require(phone_number_id, "phone_number_id")
+        self.vault.set(WHATSAPP_ACCESS_TOKEN, access_token.strip())
+        self.vault.set(WHATSAPP_OWNER_PHONE, owner_phone.strip())
+        self.vault.set(WHATSAPP_PHONE_NUMBER_ID, phone_number_id.strip())
+        return self.whatsapp_status()
+
+    def remove_whatsapp(self) -> ChannelStatus:
+        self.vault.delete(WHATSAPP_ACCESS_TOKEN)
+        self.vault.delete(WHATSAPP_OWNER_PHONE)
+        self.vault.delete(WHATSAPP_PHONE_NUMBER_ID)
+        return self.whatsapp_status()
+
+    def connect_email(
+        self,
+        *,
+        owner_email: str,
+        smtp_host: str = "",
+        smtp_user: str = "",
+        smtp_pass: str = "",
+    ) -> ChannelStatus:
+        self._require(owner_email, "owner_email")
+        self.vault.set(EMAIL_OWNER_EMAIL, owner_email.strip())
+        if smtp_host.strip():
+            self.vault.set(EMAIL_SMTP_HOST, smtp_host.strip())
+        if smtp_user.strip():
+            self.vault.set(EMAIL_SMTP_USER, smtp_user.strip())
+        if smtp_pass.strip():
+            self.vault.set(EMAIL_SMTP_PASS, smtp_pass.strip())
+        return self.email_status()
+
+    def remove_email(self) -> ChannelStatus:
+        self.vault.delete(EMAIL_OWNER_EMAIL)
+        self.vault.delete(EMAIL_SMTP_HOST)
+        self.vault.delete(EMAIL_SMTP_USER)
+        self.vault.delete(EMAIL_SMTP_PASS)
+        return self.email_status()
+
+    def connect_sms(
+        self, *, account_sid: str, auth_token: str, from_number: str, owner_phone: str
+    ) -> ChannelStatus:
+        self._require(account_sid, "account_sid")
+        self._require(auth_token, "auth_token")
+        self._require(from_number, "from_number")
+        self._require(owner_phone, "owner_phone")
+        self.vault.set(SMS_ACCOUNT_SID, account_sid.strip())
+        self.vault.set(SMS_AUTH_TOKEN, auth_token.strip())
+        self.vault.set(SMS_FROM_NUMBER, from_number.strip())
+        self.vault.set(SMS_OWNER_PHONE, owner_phone.strip())
+        return self.sms_status()
+
+    def remove_sms(self) -> ChannelStatus:
+        self.vault.delete(SMS_ACCOUNT_SID)
+        self.vault.delete(SMS_AUTH_TOKEN)
+        self.vault.delete(SMS_FROM_NUMBER)
+        self.vault.delete(SMS_OWNER_PHONE)
+        return self.sms_status()
+
     def test_telegram(self) -> dict[str, Any]:
         status = self.telegram_status()
         message = (
@@ -172,6 +292,18 @@ class ChannelManager:
 
     def test_slack(self) -> dict[str, Any]:
         return _test_result("slack", self.slack_status())
+
+    def test_whatsapp(self) -> dict[str, Any]:
+        return _test_result("whatsapp", self.whatsapp_status())
+
+    def test_email(self) -> dict[str, Any]:
+        result = _test_result("email", self.email_status())
+        if result["ok"]:
+            result["message"] = "Email draft-only approval bridge is configured."
+        return result
+
+    def test_sms(self) -> dict[str, Any]:
+        return _test_result("sms", self.sms_status())
 
     def telegram_config(self) -> TelegramConfig | None:
         token = self.vault.get(TELEGRAM_BOT_TOKEN)
@@ -200,6 +332,43 @@ class ChannelManager:
             bot_token=token,
             owner_user_id=owner,
             signing_secret=self.vault.get(SLACK_SIGNING_SECRET) or "",
+        )
+
+    def whatsapp_config(self) -> WhatsAppConfig | None:
+        token = self.vault.get(WHATSAPP_ACCESS_TOKEN)
+        owner = self.vault.get(WHATSAPP_OWNER_PHONE)
+        phone_number_id = self.vault.get(WHATSAPP_PHONE_NUMBER_ID)
+        if not token or not owner or not phone_number_id:
+            return None
+        return WhatsAppConfig.make(
+            access_token=token,
+            owner_phone=owner,
+            phone_number_id=phone_number_id,
+        )
+
+    def email_config(self) -> EmailConfig | None:
+        owner = self.vault.get(EMAIL_OWNER_EMAIL)
+        if not owner:
+            return None
+        return EmailConfig.make(
+            owner_email=owner,
+            smtp_host=self.vault.get(EMAIL_SMTP_HOST) or "",
+            smtp_user=self.vault.get(EMAIL_SMTP_USER) or "",
+            smtp_pass=self.vault.get(EMAIL_SMTP_PASS) or "",
+        )
+
+    def sms_config(self) -> SMSConfig | None:
+        account_sid = self.vault.get(SMS_ACCOUNT_SID)
+        auth_token = self.vault.get(SMS_AUTH_TOKEN)
+        from_number = self.vault.get(SMS_FROM_NUMBER)
+        owner = self.vault.get(SMS_OWNER_PHONE)
+        if not account_sid or not auth_token or not from_number or not owner:
+            return None
+        return SMSConfig.make(
+            account_sid=account_sid,
+            auth_token=auth_token,
+            from_number=from_number,
+            owner_phone=owner,
         )
 
     @staticmethod
@@ -310,6 +479,42 @@ class SlackActionHandler:
         return self.bot.handle_callback(user_id, action_id)
 
 
+class WhatsAppWebhookHandler:
+    def __init__(self, *, config: WhatsAppConfig, queue: Any) -> None:
+        self.bot = WhatsAppBot(config, queue)
+
+    def handle_webhook(self, payload: dict[str, Any]) -> str:
+        message = _first_whatsapp_message(payload)
+        if not message:
+            return ""
+        sender = str(message.get("from", ""))
+        interactive = message.get("interactive")
+        if isinstance(interactive, dict):
+            button = interactive.get("button_reply")
+            if isinstance(button, dict):
+                return self.bot.handle_callback(sender, str(button.get("id", "")))
+        text = message.get("text")
+        if isinstance(text, dict):
+            return self.bot.handle_text(sender, str(text.get("body", "")))
+        return "Unrecognized action."
+
+
+class EmailReplyHandler:
+    def __init__(self, *, config: EmailConfig, queue: Any) -> None:
+        self.bot = EmailBot(config, queue)
+
+    def handle_reply(self, *, from_email: str, body: str) -> str:
+        return self.bot.handle_text(from_email, body)
+
+
+class SMSReplyHandler:
+    def __init__(self, *, config: SMSConfig, queue: Any) -> None:
+        self.bot = SMSBot(config, queue)
+
+    def handle_message(self, *, from_phone: str, body: str) -> str:
+        return self.bot.handle_text(from_phone, body)
+
+
 def _test_result(channel: str, status: ChannelStatus) -> dict[str, Any]:
     message = (
         f"{status.label} credentials are present."
@@ -322,3 +527,19 @@ def _test_result(channel: str, status: ChannelStatus) -> dict[str, Any]:
         "message": message,
         "missing": status.missing,
     }
+
+
+def _first_whatsapp_message(payload: dict[str, Any]) -> dict[str, Any] | None:
+    entries = payload.get("entry")
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        changes = entry.get("changes") if isinstance(entry, dict) else None
+        if not isinstance(changes, list):
+            continue
+        for change in changes:
+            value = change.get("value") if isinstance(change, dict) else None
+            messages = value.get("messages") if isinstance(value, dict) else None
+            if isinstance(messages, list) and messages and isinstance(messages[0], dict):
+                return messages[0]
+    return None

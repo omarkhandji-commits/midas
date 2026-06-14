@@ -556,6 +556,193 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         )
         return _json(200, {"ok": True, "channel": status_json})
 
+    @app.post("/api/channels/whatsapp")
+    async def api_channels_whatsapp_connect(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            access_token = str(body.get("access_token") or "")
+            owner_phone = str(body.get("owner_phone") or "")
+            phone_number_id = str(body.get("phone_number_id") or "")
+            status_json = deps.channels.connect_whatsapp(
+                access_token=access_token,
+                owner_phone=owner_phone,
+                phone_number_id=phone_number_id,
+            ).to_json()
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="channels.whatsapp.connect",
+            inputs={
+                "access_token_supplied": bool(access_token.strip()),
+                "owner_supplied": bool(owner_phone.strip()),
+                "phone_number_id_supplied": bool(phone_number_id.strip()),
+            },
+            outputs={"connected": status_json["connected"], "missing": status_json["missing"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
+    @app.post("/api/channels/whatsapp/test")
+    def api_channels_whatsapp_test(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        result = deps.channels.test_whatsapp()
+        _receipt(
+            deps,
+            tool="channels.whatsapp.test",
+            inputs={"channel": "whatsapp"},
+            outputs={"ok": result["ok"], "missing": result["missing"]},
+            decision=Decision.ALLOW if result["ok"] else Decision.DENY,
+        )
+        return _json(200, result)
+
+    @app.delete("/api/channels/whatsapp")
+    def api_channels_whatsapp_remove(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        status_json = deps.channels.remove_whatsapp().to_json()
+        _receipt(
+            deps,
+            tool="channels.whatsapp.remove",
+            inputs={"channel": "whatsapp"},
+            outputs={"connected": status_json["connected"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
+    @app.post("/api/channels/email")
+    async def api_channels_email_connect(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            owner_email = str(body.get("owner_email") or "")
+            smtp_host = str(body.get("smtp_host") or "")
+            smtp_user = str(body.get("smtp_user") or "")
+            smtp_pass = str(body.get("smtp_pass") or "")
+            status_json = deps.channels.connect_email(
+                owner_email=owner_email,
+                smtp_host=smtp_host,
+                smtp_user=smtp_user,
+                smtp_pass=smtp_pass,
+            ).to_json()
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="channels.email.connect",
+            inputs={
+                "owner_supplied": bool(owner_email.strip()),
+                "smtp_host_supplied": bool(smtp_host.strip()),
+                "smtp_user_supplied": bool(smtp_user.strip()),
+                "smtp_pass_supplied": bool(smtp_pass.strip()),
+                "mode": "draft_only",
+            },
+            outputs={"connected": status_json["connected"], "missing": status_json["missing"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
+    @app.post("/api/channels/email/test")
+    def api_channels_email_test(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        result = deps.channels.test_email()
+        _receipt(
+            deps,
+            tool="channels.email.test",
+            inputs={"channel": "email", "mode": "draft_only"},
+            outputs={"ok": result["ok"], "missing": result["missing"]},
+            decision=Decision.ALLOW if result["ok"] else Decision.DENY,
+        )
+        return _json(200, result)
+
+    @app.delete("/api/channels/email")
+    def api_channels_email_remove(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        status_json = deps.channels.remove_email().to_json()
+        _receipt(
+            deps,
+            tool="channels.email.remove",
+            inputs={"channel": "email"},
+            outputs={"connected": status_json["connected"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
+    @app.post("/api/channels/sms")
+    async def api_channels_sms_connect(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            account_sid = str(body.get("account_sid") or "")
+            auth_token = str(body.get("auth_token") or "")
+            from_number = str(body.get("from_number") or "")
+            owner_phone = str(body.get("owner_phone") or "")
+            status_json = deps.channels.connect_sms(
+                account_sid=account_sid,
+                auth_token=auth_token,
+                from_number=from_number,
+                owner_phone=owner_phone,
+            ).to_json()
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="channels.sms.connect",
+            inputs={
+                "account_sid_supplied": bool(account_sid.strip()),
+                "auth_token_supplied": bool(auth_token.strip()),
+                "from_number_supplied": bool(from_number.strip()),
+                "owner_supplied": bool(owner_phone.strip()),
+            },
+            outputs={"connected": status_json["connected"], "missing": status_json["missing"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
+    @app.post("/api/channels/sms/test")
+    def api_channels_sms_test(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        result = deps.channels.test_sms()
+        _receipt(
+            deps,
+            tool="channels.sms.test",
+            inputs={"channel": "sms"},
+            outputs={"ok": result["ok"], "missing": result["missing"]},
+            decision=Decision.ALLOW if result["ok"] else Decision.DENY,
+        )
+        return _json(200, result)
+
+    @app.delete("/api/channels/sms")
+    def api_channels_sms_remove(request: Request) -> Response:
+        _require_session(request)
+        if deps.channels is None:
+            return _json(503, {"error": "channels disabled"})
+        status_json = deps.channels.remove_sms().to_json()
+        _receipt(
+            deps,
+            tool="channels.sms.remove",
+            inputs={"channel": "sms"},
+            outputs={"connected": status_json["connected"]},
+        )
+        return _json(200, {"ok": True, "channel": status_json})
+
     @app.get("/api/providers")
     def api_providers(request: Request) -> Response:
         _require_session(request)
