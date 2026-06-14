@@ -137,6 +137,7 @@ def discover_candidates(
     router: LLMRouter,
     search: SearchAdapter | None = None,
     verifier: SourceVerifier | None = None,
+    memory_context: str = "",
     run_id: str | None = None,
     task_id: str | None = None,
     est_usd: float = 0.0,
@@ -149,9 +150,16 @@ def discover_candidates(
     findings de-rated. Budgeted + receipted via the router.
     """
     grounding = gather_evidence(niche, search) if search is not None else ""
-    user = f"Niche: {niche}\n{grounding}\nReturn the JSON now." if grounding else (
-        f"Niche: {niche}\nReturn the JSON now."
-    )
+    parts = [f"Niche: {niche}"]
+    if memory_context.strip():
+        parts.append(
+            "Relevant MIDAS memory. Use it as business context, not as proof unless sourced:\n"
+            + memory_context
+        )
+    if grounding:
+        parts.append(grounding)
+    parts.append("Return the JSON now.")
+    user = "\n\n".join(parts)
     messages = [
         {"role": "system", "content": DISCOVER_SYSTEM},
         {"role": "user", "content": user},

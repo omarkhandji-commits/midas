@@ -56,6 +56,7 @@ class DashboardDeps:
     allowed_hosts: set[str]
     ledger: Any = None  # ReceiptLedger for the cost meter (optional)
     memory: Any = None  # MemoryStore — required for /outcomes; optional otherwise
+    competitors: Any = None  # CompetitorStore for Market Radar APIs
     sse_interval_seconds: float = 1.5  # tests can shorten via deps; UI default is 1.5s
 
 
@@ -128,6 +129,8 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         pending = deps.queue.pending()
         receipts = list(deps.ledger) if deps.ledger is not None else []
         spent = round(sum(r.body.cost_usd for r in receipts), 6)
+        memory_count = len(deps.memory.recall(limit=10_000)) if deps.memory is not None else 0
+        competitor_count = len(deps.competitors.list()) if deps.competitors is not None else 0
         return templates.TemplateResponse(
             request,
             "dashboard.html",
@@ -136,8 +139,14 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
                 "pending": pending,
                 "spent_usd": spent,
                 "receipt_count": len(receipts),
+                "memory_count": memory_count,
+                "competitor_count": competitor_count,
             },
         )
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    def dashboard_alias(request: Request) -> Any:
+        return home(request)
 
     @app.post("/approvals/{req_id}/approve")
     def approve(request: Request, req_id: int) -> Response:
@@ -148,6 +157,86 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
     def reject(request: Request, req_id: int) -> Response:
         _require_session(request)
         return _resolve(deps, req_id, approve=False)
+
+    @app.get("/api/runs")
+    def api_runs(request: Request) -> Response:
+        _require_session(request)
+        receipts = list(deps.ledger) if deps.ledger is not None else []
+        runs: dict[str, dict[str, Any]] = {}
+        for r in receipts:
+            item = runs.setdefault(
+                r.body.run_id,
+                {"run_id": r.body.run_id, "receipts": 0, "cost_usd": 0.0, "latest_ts": ""},
+            )
+            item["receipts"] += 1
+            item["cost_usd"] = round(float(item["cost_usd"]) + r.body.cost_usd, 6)
+            item["latest_ts"] = r.body.ts
+        return _json(200, {"runs": list(runs.values())[-50:]})
+
+    @app.get("/api/proofs")
+    def api_proofs(request: Request) -> Response:
+        _require_session(request)
+        receipts = list(deps.ledger) if deps.ledger is not None else []
+        proofs = [
+            {
+                "seq": r.body.seq,
+                "run_id": r.body.run_id,
+                "agent": r.body.agent,
+                "tool": r.body.tool,
+                "decision": r.body.decision.value,
+                "hash": r.hash,
+                "prev_hash": r.body.prev_hash,
+                "ts": r.body.ts,
+            }
+            for r in receipts[-100:]
+        ]
+        return _json(200, {"proofs": proofs})
+
+    @app.get("/api/approvals")
+    def api_approvals(request: Request) -> Response:
+        _require_session(request)
+        return _json(200, {"pending": [_approval_json(r) for r in deps.queue.pending()]})
+
+    @app.post("/api/approvals/{req_id}/approve")
+    def api_approve(request: Request, req_id: int) -> Response:
+        _require_session(request)
+        return _resolve(deps, req_id, approve=True)
+
+    @app.post("/api/approvals/{req_id}/reject")
+    def api_reject(request: Request, req_id: int) -> Response:
+        _require_session(request)
+        return _resolve(deps, req_id, approve=False)
+
+    @app.get("/api/memory/search")
+    def api_memory_search(request: Request, q: str = "", kind: str | None = None) -> Response:
+        _require_session(request)
+        if deps.memory is None:
+            return _json(503, {"error": "memory disabled"})
+        try:
+            from midas.core.memory import MemoryKind
+
+            rows = deps.memory.recall(
+                kind=MemoryKind(kind) if kind else None,
+                query=q or None,
+                limit=50,
+            )
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        return _json(200, {"memory": [_memory_json(r) for r in rows]})
+
+    @app.get("/api/competitors")
+    def api_competitors(request: Request) -> Response:
+        _require_session(request)
+        if deps.competitors is None:
+            return _json(503, {"error": "competitors disabled"})
+        return _json(200, {"competitors": [c.__dict__ for c in deps.competitors.list()]})
+
+    @app.get("/api/assets")
+    def api_assets(request: Request) -> Response:
+        _require_session(request)
+        from midas.flagship.assets import ASSET_KEYS
+
+        return _json(200, {"asset_types": list(ASSET_KEYS)})
 
     @app.get("/events")
     async def events(request: Request) -> Any:
@@ -211,6 +300,10 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
             "proof_level": entry.proof_level.value,
         })
 
+    @app.post("/api/outcomes")
+    async def api_outcomes(request: Request) -> Response:
+        return await outcomes(request)
+
     return app
 
 
@@ -225,6 +318,36 @@ def _resolve(deps: DashboardDeps, req_id: int, *, approve: bool) -> Response:
         # 409 = state conflict (already resolved). Idempotency surfaces cleanly.
         return _json(409, {"error": str(exc)})
     return _json(200, {"ok": True, "id": req_id})
+
+
+def _approval_json(req: Any) -> dict[str, Any]:
+    return {
+        "id": req.id,
+        "run_id": req.run_id,
+        "agent": req.agent,
+        "tool": req.tool,
+        "action": req.action,
+        "summary": req.summary,
+        "payload": req.payload,
+        "status": req.status.value,
+        "created_ts": req.created_ts,
+        "resolved_ts": req.resolved_ts,
+        "resolver": req.resolver,
+        "note": req.note,
+    }
+
+
+def _memory_json(row: Any) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "ts": row.ts,
+        "kind": row.kind.value,
+        "key": row.key,
+        "content": row.content,
+        "proof_level": row.proof_level.value,
+        "sources": row.sources,
+        "tags": row.tags,
+    }
 
 
 def _json(code: int, body: dict) -> Response:

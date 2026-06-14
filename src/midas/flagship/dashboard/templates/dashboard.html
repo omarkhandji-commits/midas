@@ -1,7 +1,7 @@
 {% extends "_base.html" %}
 {% block title %}MIDAS · operator{% endblock %}
 {% block meta %}
-  <span class="m-meta__item" title="Total cost paid this run, summed from the verifiable receipts ledger.">
+  <span class="m-meta__item" title="Total cost summed from the receipts ledger.">
     <span class="m-meta__label">Spent</span>
     <span class="m-meta__val" id="spent-usd">${{ "%.4f"|format(spent_usd) }}</span>
   </span>
@@ -9,18 +9,43 @@
     <span class="m-meta__label">Receipts</span>
     <span class="m-meta__val" id="receipt-count">{{ receipt_count }}</span>
   </span>
-  <span class="m-meta__item m-meta__item--ok" title="Audit chain status. Drops to FAIL the moment any byte is mutated.">
+  <span class="m-meta__item m-meta__item--ok" title="Audit chain status.">
     <span class="m-meta__label">Chain</span>
     <span class="m-meta__val">OK</span>
   </span>
 {% endblock %}
 {% block content %}
+<section class="m-ops-grid" aria-label="MIDAS operator console">
+  <article class="m-panel m-panel--primary">
+    <p class="m-kicker">Daily Revenue Move</p>
+    <h1 class="m-display">Proof first. Draft second. Approval before action.</h1>
+    <p class="m-copy">
+      Run <code class="m-code">midas scan "your niche"</code>. MIDAS prepares one move,
+      cites sources, queues the risky next step, then waits.
+    </p>
+  </article>
+  <article class="m-panel">
+    <p class="m-kicker">Approvals</p>
+    <div class="m-stat">{{ pending|length }}</div>
+    <p class="m-copy">Outbound or irreversible actions waiting for owner decision.</p>
+  </article>
+  <article class="m-panel">
+    <p class="m-kicker">Business Memory</p>
+    <div class="m-stat">{{ memory_count }}</div>
+    <p class="m-copy">User, business, decision, result, market, and error facts.</p>
+  </article>
+  <article class="m-panel">
+    <p class="m-kicker">Market Radar</p>
+    <div class="m-stat">{{ competitor_count }}</div>
+    <p class="m-copy">Tracked competitors with dated source snapshots.</p>
+  </article>
+</section>
+
 <section class="m-section">
   <header class="m-section__head">
-    <h2 class="m-section__title">Pending approvals</h2>
+    <h2 class="m-section__title">Approval Center</h2>
     <p class="m-section__lede">
-      Nothing executes until you tap. Resolutions are written to the receipts ledger
-      and propagated to every connected channel.
+      Nothing leaves the machine until approved. Every resolution is written to receipts.
     </p>
   </header>
 
@@ -47,21 +72,46 @@
         <td class="m-table__sum">{{ req.summary }}</td>
         <td><time>{{ req.created_ts }}</time></td>
         <td class="m-table__act">
-          <button class="m-btn m-btn--ok"  data-action="approve" data-id="{{ req.id }}">Approve</button>
-          <button class="m-btn m-btn--no"  data-action="reject"  data-id="{{ req.id }}">Reject</button>
+          <button class="m-btn m-btn--ok" data-action="approve" data-id="{{ req.id }}">
+            Approve
+          </button>
+          <button class="m-btn m-btn--no" data-action="reject" data-id="{{ req.id }}">
+            Reject
+          </button>
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p class="m-empty">No pending approvals. You are clear.</p>
+  <p class="m-empty">No pending approvals. The operator is clear.</p>
   {% endif %}
 </section>
 
+<section class="m-console-band">
+  <div>
+    <h2 class="m-section__title">Proof Ledger</h2>
+    <p class="m-section__lede">
+      Receipts are hash-chained. Claims without surviving sources are downgraded.
+    </p>
+  </div>
+  <div>
+    <h2 class="m-section__title">Asset Studio</h2>
+    <p class="m-section__lede">
+      Offers, landing copy, outreach, SEO, proposal PDF, invoice PDF, scripts, and plan.
+    </p>
+  </div>
+  <div>
+    <h2 class="m-section__title">Outcome Tracker</h2>
+    <p class="m-section__lede">
+      Record replies, sales, clicks, misses, and errors so future runs improve.
+    </p>
+  </div>
+</section>
+
 <section class="m-disclaimer">
-  Local dashboard only. The agent drafts; you approve and execute outbound actions.
-  Every claim must cite a verified source or it is downgraded. No revenue is promised.
+  Local dashboard only. No telemetry. No public post, message, call, file-risk, or money
+  action is executed without approval. No revenue is promised.
 </section>
 {% endblock %}
 {% block scripts %}

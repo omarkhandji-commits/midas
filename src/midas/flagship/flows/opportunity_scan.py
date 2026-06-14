@@ -143,11 +143,19 @@ def scan_niche(
     """
     from .discover import discover_candidates
 
+    memory_context = ""
+    if memory is not None:
+        try:
+            memory_context = memory.context_pack(query=niche)
+        except AttributeError:
+            memory_context = ""
+
     candidates = discover_candidates(
         niche,
         router=router,  # type: ignore[arg-type]
         search=search,  # type: ignore[arg-type]
         verifier=verifier,  # type: ignore[arg-type]
+        memory_context=memory_context,
         run_id=run_id,
         task_id=task_id,
         est_usd=est_usd,
@@ -165,13 +173,11 @@ def _log_scan_decision(
     """Write the scan's decision into memory's DECISION namespace (Proof-First sourcing)."""
     from midas.core.memory import MemoryKind  # local import: avoid circular at module load
 
-    try:
-        record = getattr(memory, "record_decision")
-    except AttributeError:
+    if not hasattr(memory, "record_decision"):
         return
     rejected = [s.candidate.name for s in shortlist[1:4]]  # top alternates we passed on
     if move is not None:
-        record(
+        memory.record_decision(  # type: ignore[attr-defined]
             f"scan:{niche}",
             chose=move.candidate.name,
             rejected=rejected,
@@ -179,8 +185,8 @@ def _log_scan_decision(
                  f"({move.proof_level.value})"),
             sources=move.candidate.sources,
         )
-    else:
-        getattr(memory, "remember")(
+    elif hasattr(memory, "remember"):
+        memory.remember(  # type: ignore[attr-defined]
             MemoryKind.DECISION,
             f"scan:{niche}",
             f"abstained: {abstained}",

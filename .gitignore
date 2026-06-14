@@ -8,6 +8,7 @@ secrets/
 config/providers.yml          # real provider config (keep providers.example.yml only)
 
 # Agent memory / runtime state (private business data)
+.midas/
 memory/*
 !memory/.gitkeep
 !memory/DECISIONS.md

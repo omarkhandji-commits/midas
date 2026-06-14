@@ -21,6 +21,7 @@ from midas.core.agents.summary import Finding, ProofLevel
 from midas.core.budget import BudgetExceeded, BudgetFuse, Caps, SpendStore
 from midas.core.config import load_policy
 from midas.core.config.models import ProvidersConfig, RoleConfig
+from midas.core.context import ContextBudget, SafeContextCompressor
 from midas.core.eval import CaseResult, Eval, Suite
 from midas.core.receipts.models import Taint
 from midas.core.router import ChatResult, LLMRouter
@@ -163,9 +164,9 @@ def _eval_assets() -> list[CaseResult]:
     # 5a. every asset slot is non-empty (no AI slop / blank scaffolds).
     missing = [k for k in ASSET_KEYS if not assets.get(k, "").strip()]
     cases.append(CaseResult(
-        name="all five assets are non-empty",
+        name="all business assets are non-empty",
         passed=not missing,
-        expected="all 5 keys filled", actual=f"missing: {missing or 'none'}",
+        expected=f"all {len(ASSET_KEYS)} keys filled", actual=f"missing: {missing or 'none'}",
     ))
 
     # 5b. the outreach email keeps the opt-in placeholder rather than auto-personalizing.
@@ -184,6 +185,37 @@ def _eval_assets() -> list[CaseResult]:
         expected="mentions approval", actual="missing" if "approv" not in script_l else "ok",
     ))
     return cases
+
+
+def _eval_context_compression() -> list[CaseResult]:
+    original = "market source says invoice delays are painful. " * 600
+    compressor = SafeContextCompressor(ContextBudget(max_chars_per_chunk=1_000))
+    compressed = compressor.compress("market-source", original)
+    critical = compressor.compress("proof-quote", original, proof_critical=True)
+    return [
+        CaseResult(
+            name="long working context compresses",
+            passed=compressed.compressed and compressed.saved_chars > 0,
+            expected="compressed with saved chars",
+            actual=f"compressed={compressed.compressed}, saved={compressed.saved_chars}",
+        ),
+        CaseResult(
+            name="compressed original is retrievable by hash",
+            passed=compressor.retrieve_original(compressed.original_hash) == original,
+            expected="original bytes available",
+            actual=(
+                "available"
+                if compressor.retrieve_original(compressed.original_hash)
+                else "missing"
+            ),
+        ),
+        CaseResult(
+            name="proof-critical context is not compressed",
+            passed=(not critical.compressed) and critical.text == original,
+            expected="raw proof preserved",
+            actual=f"compressed={critical.compressed}",
+        ),
+    ]
 
 
 # ── suite ─────────────────────────────────────────────────────────────────────
@@ -214,6 +246,13 @@ def build_suite(policy_path: str | Path) -> Suite:
                     "Untrusted + private + egress in one step is denied; callable never runs."
                 ),
                 run=lambda: _eval_trifecta(policy_path),
+            ),
+            Eval(
+                name="context compression fidelity",
+                description=(
+                    "Token economy compresses working context while preserving originals."
+                ),
+                run=_eval_context_compression,
             ),
             Eval(
                 name="asset quality",
