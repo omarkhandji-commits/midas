@@ -50,6 +50,10 @@ def test_full_suite_passes_clean_checkout() -> None:
     assert {r.eval_name for r in results} == {
         "fake-source clamping", "unsourced model claims", "budget fuse",
         "lethal trifecta", "context compression fidelity", "asset quality",
+        "débrouillard web research",
+        "gated executor — no mutation without approval",
+        "débrouillard artifacts — never refuse, always gated",
+        "τ-bench rule adherence",
         "operator autonomy guardrails",
     }
     for r in results:

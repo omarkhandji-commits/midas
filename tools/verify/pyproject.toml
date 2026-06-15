@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "midas-verify"
+version = "1.0.0"
+description = "Standalone verifier for Receipt v1 ledgers (PyNaCl only)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = ["pynacl>=1.5"]
+
+[project.scripts]
+midas-verify = "midas_verify.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["midas_verify"]

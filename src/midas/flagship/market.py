@@ -184,6 +184,66 @@ class CompetitorStore:
             ).fetchone()
         return row[0] if row else None
 
+    def get(self, competitor_id: int) -> Competitor | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id,created_ts,name,url,notes FROM competitors WHERE id=?",
+                (competitor_id,),
+            ).fetchone()
+        return self._row_competitor(row) if row else None
+
+    def delete(self, competitor_id: int) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM competitors WHERE id=?", (competitor_id,))
+            self._conn.execute(
+                "DELETE FROM competitor_snapshots WHERE competitor_id=?", (competitor_id,)
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def snapshots(
+        self, competitor_id: int, *, limit: int = 50
+    ) -> builtins.list[CompetitorSnapshot]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ts,competitor_id,url,status,content_hash,excerpt,changed,id "
+                "FROM competitor_snapshots WHERE competitor_id=? ORDER BY id ASC LIMIT ?",
+                (competitor_id, limit),
+            ).fetchall()
+        comp = self.get(competitor_id)
+        name = comp.name if comp else ""
+        # Walk oldest→newest so we can detect "initial" as the first OK reading.
+        seen_ok = False
+        forward: builtins.list[CompetitorSnapshot] = []
+        for r in rows:
+            changed = bool(r[6])
+            status = int(r[3])
+            content_hash = r[4] or ""
+            if not (200 <= status < 300) or not content_hash:
+                change_kind = "unreachable"
+            elif not seen_ok:
+                change_kind = "initial"
+                seen_ok = True
+            elif changed:
+                change_kind = "changed"
+            else:
+                change_kind = "unchanged"
+            forward.append(
+                CompetitorSnapshot(
+                    competitor_id=int(r[1]),
+                    name=name,
+                    url=r[2],
+                    status=status,
+                    content_hash=content_hash,
+                    changed=changed,
+                    change_kind=change_kind,
+                    excerpt=r[5] or "",
+                    ts=r[0],
+                )
+            )
+        # Return newest-first so the UI can render most-recent at top.
+        return list(reversed(forward))
+
     @staticmethod
     def _row_competitor(row: tuple) -> Competitor:
         return Competitor(id=row[0], created_ts=row[1], name=row[2], url=row[3], notes=row[4])

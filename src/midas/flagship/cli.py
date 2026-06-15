@@ -38,6 +38,9 @@ media_app = typer.Typer(
 voice_app = typer.Typer(
     help="Draft voice messages and approval-gated call plans.", no_args_is_help=True
 )
+keys_app = typer.Typer(
+    help="Inspect public signing keys (Receipt v1).", no_args_is_help=True
+)
 
 app.add_typer(approvals_app, name="approvals")
 app.add_typer(memory_app, name="memory")
@@ -49,6 +52,22 @@ app.add_typer(schedule_app, name="schedule")
 app.add_typer(skills_app, name="skills")
 app.add_typer(media_app, name="media")
 app.add_typer(voice_app, name="voice")
+app.add_typer(keys_app, name="keys")
+
+
+@keys_app.command("export-public")
+def keys_export_public(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Print the Ed25519 public key used to sign this install's Receipt v1 ledger.
+
+    Hand this hex string to anyone who wants to verify your receipts independently
+    with ``python -m midas_verify <ledger.jsonl> --public-key <hex>``.
+    """
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    typer.echo(rt.ledger.public_key_hex)
 
 
 @app.callback()
@@ -151,6 +170,11 @@ def eval(
     out: str | None = typer.Option(
         None, "--out", "-o", help="Write the Transparency Report to this path."
     ),
+    suite: str = typer.Option(
+        "all",
+        "--suite",
+        help="Eval subset: 'all' (default) or 'tau' for τ-bench-only rule adherence.",
+    ),
     base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
 ) -> None:
     """Run the deterministic Proof-First eval suite."""
@@ -158,7 +182,18 @@ def eval(
     from midas.flagship.eval import build_suite
 
     policy_path = Path(base_dir) / "config" / "policy.yml"
-    results = build_suite(policy_path).run()
+    full = build_suite(policy_path)
+    if suite == "tau":
+        chosen = [e for e in full.evals if "τ-bench" in e.name or "tau" in e.name.lower()]
+        if not chosen:
+            raise typer.BadParameter("no τ-bench eval registered in the suite")
+        from midas.core.eval import Suite
+
+        results = Suite(name=f"{full.name} — τ-bench only", evals=chosen).run()
+    elif suite == "all":
+        results = full.run()
+    else:
+        raise typer.BadParameter("--suite must be 'all' or 'tau'")
     report = render_report(results)
     if out:
         Path(out).write_text(report, encoding="utf-8")
@@ -584,6 +619,173 @@ def providers_test(
 
 
 @app.command()
+def do(
+    task: str = typer.Argument(..., help="What you want MIDAS to do in the workspace."),
+    max_steps: int = typer.Option(6, "--max-steps", help="Loop iteration cap."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Run the gated agent loop on a task. Mutations queue approvals; reads run inline."""
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    loop = rt.agent_loop(run_id=f"do:{task[:32]}", max_steps=max_steps)
+    transcript = loop.run(task)
+    typer.echo(json.dumps(transcript.to_json(), indent=2, ensure_ascii=False))
+    if transcript.queued_approvals:
+        typer.echo(
+            f"\n{len(transcript.queued_approvals)} approval(s) queued: "
+            f"{transcript.queued_approvals}. Resolve with `midas approvals approve <id>`."
+        )
+
+    # Post-run: ask AutoSkills to detect proposals from the receipts this run produced.
+    # Surfaces sequences worth reusing without ever running anything automatically.
+    proposals = _autoskills(rt).detect()
+    if proposals:
+        typer.echo(
+            "\nAuto-skill proposals from this run "
+            "(review with `midas skills auto-list`):"
+        )
+        for p in proposals:
+            scope = "local" if p.local_only else "needs-approval"
+            typer.echo(f"  - {p.proposal_id}  [{scope}]  {p.name}")
+
+
+@app.command()
+def fill(
+    target: str = typer.Argument(..., help="Spreadsheet to fill (.xlsx or .csv)."),
+    sources: Annotated[
+        list[str] | None,
+        typer.Option("--from", "-f", help="PDFs (or text files) to extract rows from."),
+    ] = None,
+    sheet_name: str = typer.Option("Sheet1", "--sheet", help="Sheet name (xlsx only)."),
+    start_row: int = typer.Option(1, "--start-row", help="First spreadsheet row to write."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Extract rows from one or more PDFs and queue a sheet.write approval.
+
+    The PDF→cells mapping is DETERMINISTIC (no LLM) — the operator approves real
+    cells with real values. Use ``midas execute <approval_id>`` to materialize the
+    write after review.
+    """
+    from midas.flagship.agent.tools.data import extract_rows, rows_to_cells
+    from midas.flagship.agent.tools.pdf import pdf_extract
+    from midas.flagship.agent.tools.sheet import plan_sheet_write
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    if rt.fs_guard is None:
+        raise typer.BadParameter("fs_guard not initialized — run `midas setup` first")
+    rows = []
+    for src in sources or []:
+        extracted = pdf_extract(rt.fs_guard, src)
+        rows.extend(extract_rows(extracted.text))
+    if not rows:
+        raise typer.BadParameter(
+            "no recognizable rows in the sources (label:value or date amount)"
+        )
+    cells = rows_to_cells(rows, start_row=start_row)
+    plan = plan_sheet_write(rt.fs_guard, target, sheet_name=sheet_name, cells=cells)
+    req = rt.approvals.enqueue(
+        run_id=f"fill:{target}",
+        agent="cli",
+        tool="sheet.write",
+        action="write_spreadsheet",
+        summary=f"Fill {plan.cell_count} cells in {plan.path} (range {plan.cell_range})",
+        payload={
+            "path": plan.path,
+            "sheet_name": plan.sheet_name,
+            "cells": plan.cells,
+            "sha256_prev": plan.sha256_prev,
+        },
+    )
+    rt.append_receipt(
+        run_id=f"fill:{target}",
+        agent="cli",
+        tool="sheet.write",
+        decision=Decision.QUEUE_APPROVAL,
+        inputs={"target": target, "sources": sources, "rows": len(rows)},
+        outputs={"approval_id": req.id, "cells": plan.cell_count, "range": plan.cell_range},
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "approval_id": req.id,
+                "path": plan.path,
+                "cells": plan.cell_count,
+                "range": plan.cell_range,
+                "next": f"midas execute {req.id}",
+            },
+            indent=2,
+        )
+    )
+
+
+@app.command()
+def execute(
+    approval_id: int = typer.Argument(..., help="An approved request id."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Execute a previously-approved gated step (fs.write / code.run / sheet.write).
+
+    Reads the approval from the queue, confirms it is APPROVED, runs the underlying
+    executor, and writes a receipt naming the concrete outcome (sha256 / cell range /
+    subprocess exit code).
+    """
+    from midas.core.approvals.queue import ApprovalStatus
+    from midas.flagship.agent.execute import execute_approved_step
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    request = rt.approvals.get(approval_id)
+    if request is None:
+        raise typer.BadParameter(f"unknown approval id: {approval_id}")
+    if request.status != ApprovalStatus.APPROVED:
+        raise typer.BadParameter(
+            f"approval #{approval_id} is {request.status.value} — must be approved first"
+        )
+    result = execute_approved_step(rt, request)
+    typer.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@app.command()
+def research(
+    question: str = typer.Argument(..., help="The question to research."),
+    k: int = typer.Option(5, "--k", help="Max sources to consider."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Run a débrouillard web research pass and print a cited synthesis.
+
+    Searches, fetches, and verifies live sources before answering. A claim with zero
+    reachable sources is reported as LOW proof level — never HIGH-without-verification.
+    """
+    from midas.core.web import research as run_research
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    result = run_research(
+        question,
+        search=rt.search,
+        fetcher=rt.fetcher,
+        verifier=rt.verifier,
+        k=k,
+    )
+    rt.append_receipt(
+        run_id="research",
+        agent="cli",
+        tool="research.run",
+        inputs={"question": question, "k": k},
+        outputs={
+            "verified": result.verified_count,
+            "proof_level": result.proof_level.value,
+            "sources": [s.url for s in result.sources],
+        },
+    )
+    typer.echo(result.synthesis)
+    typer.echo(f"\nproof_level: {result.proof_level.value}")
+    typer.echo(f"verified_sources: {result.verified_count}/{len(result.sources)}")
+
+
+@app.command()
 def council(
     question: str = typer.Argument(..., help="High-stakes question to debate."),
     live: bool = typer.Option(False, "--live", help="Use real configured models."),
@@ -796,6 +998,71 @@ def skills_plan_download(
         outputs={"approval_id": req.id},
     )
     typer.echo(f"Approval queued for remote skill review: #{req.id}")
+
+
+def _autoskills(rt: Any) -> Any:
+    from midas.flagship.autoskills import AutoSkills, AutoSkillsStore
+
+    store = AutoSkillsStore(rt.state_dir / "autoskills.json")
+    return AutoSkills(
+        registry=rt.skill_registry,
+        ledger=rt.ledger,
+        queue=rt.approvals,
+        store=store,
+        search=rt.search,
+    )
+
+
+@skills_app.command("auto-list")
+def skills_auto_list(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Detect and list pending auto-skill proposals from the receipt ledger."""
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    auto = _autoskills(rt)
+    auto.detect()
+    pending = auto._store.pending()  # noqa: SLF001 - private store access intentional
+    if not pending:
+        typer.echo("No pending auto-skill proposals.")
+        return
+    for p in pending:
+        scope = "local" if p.local_only else "needs-approval"
+        typer.echo(f"{p.proposal_id}  [{scope}]  {p.name} — {p.summary}")
+
+
+@skills_app.command("auto-accept")
+def skills_auto_accept(
+    proposal_id: str = typer.Argument(..., help="Proposal id from `auto-list`."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Accept a local auto-skill proposal and install it as a draft skill."""
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    try:
+        manifest = _autoskills(rt).accept(proposal_id)
+    except (KeyError, ValueError, PermissionError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Accepted: {manifest.name} (sha256={manifest.sha256[:16]})")
+
+
+@skills_app.command("auto-discard")
+def skills_auto_discard(
+    proposal_id: str = typer.Argument(..., help="Proposal id from `auto-list`."),
+    reason: str = typer.Option("", "--reason", help="Why discard."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Discard a pending auto-skill proposal."""
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    try:
+        _autoskills(rt).discard(proposal_id, reason=reason)
+    except KeyError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Discarded {proposal_id}.")
 
 
 @media_app.command("inspect")

@@ -8,6 +8,7 @@
 [![Lint: Ruff](https://img.shields.io/badge/lint-Ruff-261230.svg)](https://docs.astral.sh/ruff/)
 [![Types: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](https://mypy-lang.org/)
 [![Proof: 17/17 evals](https://img.shields.io/badge/proof-17%2F17%20evals-2a4d3a.svg)](TRANSPARENCY.md)
+[![Receipt v1 — verifiable](https://img.shields.io/badge/Receipt%20v1-verifiable-2a4d3a.svg)](docs/RECEIPT_V1.md)
 
 <!-- After the first push to GitHub, add the live CI badge (replace <owner>/<repo>):
 [![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
@@ -15,16 +16,28 @@
 
 Proof-first business operator for founders, agencies, consultants, and small teams.
 
-MIDAS researches a market, checks sources, proposes a Daily Revenue Move, drafts the
-business assets, asks for approval before anything risky, records receipts, tracks
-outcomes, and gets cheaper over time through cache, memory, local models, and budget
-guards.
+MIDAS does the work — research, drafts, emails, PDFs, invoices, voice messages,
+spreadsheets, code — and **proves what it did**. Every action writes an Ed25519-signed,
+hash-chained receipt. Every mutating step (write a file, run code, fill an Excel) waits
+for a one-tap approval. No black-box autonomy, no "trust me" — the agent prepares, the
+human ships, and a 100-line standalone verifier can re-check every byte from a fresh
+venv.
 
-No revenue guarantee. No spam. No black-box autonomy. MIDAS is built to be useful in
-real business work while keeping the operator in control.
+If a request doesn't fit a specialized tool, MIDAS falls back to a Markdown best-effort
+artifact rather than refusing. The débrouillard rule: never block, always produce
+something the operator can edit.
+
+No revenue guarantee. No spam. Built to be useful in real business work while keeping
+the operator in control.
 
 ## What MIDAS Does
 
+- Runs the **gated executor**: a bounded agent loop where reads run inline and every
+  mutation (file write, code run, spreadsheet fill, email/PDF/invoice/voice draft)
+  becomes an approval card with the exact bytes' sha256 — nothing executes on its own.
+- Produces **any artifact you ask for**, gated: email (.eml), PDF, invoice, voice
+  message script (text + SSML), spreadsheet fill, code file, or fallback Markdown.
+  If no specialized tool fits, MIDAS drafts a best-effort artifact rather than refusing.
 - Finds business opportunities with source receipts, not model vibes.
 - Generates assets: offers, landing copy, outreach email, SEO brief, objections,
   proposal/invoice PDFs, call script, video script, and a 7-day action plan.
@@ -48,10 +61,10 @@ Most agents optimize for activity. MIDAS optimizes for proof, decisions, and out
 
 | Agent type | Common failure | MIDAS behavior |
 |---|---|---|
-| Generic chat agents | Good advice, weak follow-through | Daily Revenue Move + assets + outcome loop |
-| Auto-loop agents | Token burn and unsafe actions | budget fuse + approvals + receipts |
-| Closed SaaS agents | Hard to audit or self-host | local-first, open repo, replayable evals |
-| Dev workspaces | Strong coding, weak business memory | business memory + market radar + revenue assets |
+| Generic chat agents | Good advice, weak follow-through | Daily Revenue Move with assets and an outcome loop |
+| Auto-loop agents | Token burn and unsafe actions | Budget fuse, approvals, signed receipts |
+| Closed SaaS agents | Hard to audit or self-host | Local-first, open repo, replayable evals |
+| Dev workspaces | Strong coding, weak business memory | Business memory, market radar, revenue assets |
 
 ## Quickstart
 
@@ -140,7 +153,7 @@ Run the public eval suite:
 .venv\Scripts\midas eval
 ```
 
-Current transparency report: **17/17 cases across 7 evals pass**.
+Current transparency report: **33/33 cases across 11 evals pass**.
 
 Covered invariants include fake-source clamping, unsourced model claims, budget fuse,
 indirect prompt-injection exfiltration, context compression fidelity, asset quality,
@@ -152,6 +165,10 @@ safety.
 ```bash
 midas setup
 midas dashboard
+midas do "<task>"                 # gated agent loop — never refuses, always gated
+midas execute <approval_id>       # materialize an approved fs.write / code.run / sheet.write
+midas fill <target.xlsx> --from <pdf1> --from <pdf2>   # deterministic PDF→spreadsheet
+midas research "<question>"       # cited synthesis, proof level by reachable sources
 midas scan "<niche>"
 midas providers list|doctor|add|test|example
 midas council "<question>"
@@ -161,10 +178,11 @@ midas memory add|search|export
 midas outcome record
 midas assets generate
 midas schedule add|list|recipe
-midas skills create|list|install|plan-download
+midas skills create|list|install|plan-download|auto-list|auto-accept|auto-discard
 midas media inspect
 midas voice draft|call-plan
-midas eval
+midas keys export-public
+midas eval [--suite tau]
 midas export
 ```
 

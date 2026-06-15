@@ -1,5 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Gauge, Languages, Moon, Save, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  Download,
+  Gauge,
+  Languages,
+  Moon,
+  Save,
+  ShieldCheck,
+  Upload,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
@@ -56,6 +64,7 @@ export function SettingsPage() {
   }
 
   return (
+    <div className="space-y-6">
     <form className="space-y-6" onSubmit={save}>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card className="p-6">
@@ -165,6 +174,102 @@ export function SettingsPage() {
 
       <StatusLine error={error} notice={notice} />
     </form>
+    <BackupSection />
+    </div>
+  );
+}
+
+function BackupSection() {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function downloadExport() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const data = await api.get<unknown>("/api/export");
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      link.download = `midas-export-${stamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      setNotice("Backup downloaded.");
+    } catch (err) {
+      setError(readError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importFile(file: File) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const text = await file.text();
+      const body = JSON.parse(text);
+      const res = await api.post<{ ok: boolean; approval_id: number }>(
+        "/api/import",
+        body,
+      );
+      setNotice(
+        `Restore queued for approval (#${res.approval_id}). Confirm from the Approvals page.`,
+      );
+    } catch (err) {
+      setError(readError(err));
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <CardHeader>
+        <CardKicker>Backup</CardKicker>
+        <CardTitle>Export and restore</CardTitle>
+      </CardHeader>
+      <CardBody>
+        Export bundles your memory, competitors, schedules, and skills metadata as a JSON
+        file you keep yourself. Restore queues an approval — the data is never applied
+        without your explicit confirmation.
+      </CardBody>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <Button type="button" variant="primary" disabled={busy} onClick={downloadExport}>
+          <Download className="size-4" aria-hidden />
+          Download backup
+        </Button>
+        <Button
+          type="button"
+          variant="default"
+          disabled={busy}
+          onClick={() => fileRef.current?.click()}
+        >
+          <Upload className="size-4" aria-hidden />
+          Restore from file
+        </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) importFile(file).catch(() => undefined);
+          }}
+        />
+      </div>
+      <StatusLine error={error} notice={notice} />
+    </Card>
   );
 }
 

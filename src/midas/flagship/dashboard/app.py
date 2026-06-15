@@ -84,6 +84,9 @@ class DashboardDeps:
     search: Any = None  # SearchAdapter for live missions
     verifier: Any = None  # SourceVerifier for live missions
     channels: Any = None  # ChannelManager for owner-gated channel setup
+    fetcher: Any = None  # Fetcher used by Market Radar snapshot endpoints (optional)
+    schedule_store: Any = None  # ScheduleStore for recipe CRUD (optional)
+    skill_registry: Any = None  # SkillRegistry for skills CRUD (optional)
     chat_est_usd: float = 0.02
     sse_interval_seconds: float = 1.5  # tests can shorten via deps; UI default is 1.5s
 
@@ -198,12 +201,42 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         for r in receipts:
             item = runs.setdefault(
                 r.body.run_id,
-                {"run_id": r.body.run_id, "receipts": 0, "cost_usd": 0.0, "latest_ts": ""},
+                {
+                    "run_id": r.body.run_id,
+                    "receipts": 0,
+                    "cost_usd": 0.0,
+                    "latest_ts": "",
+                    "started_ts": r.body.ts,
+                    "agents": set(),
+                    "tools": set(),
+                    "pending_approval": False,
+                    "denied": False,
+                },
             )
             item["receipts"] += 1
             item["cost_usd"] = round(float(item["cost_usd"]) + r.body.cost_usd, 6)
             item["latest_ts"] = r.body.ts
-        return _json(200, {"runs": list(runs.values())[-50:]})
+            item["agents"].add(r.body.agent)
+            item["tools"].add(r.body.tool)
+            decision = r.body.decision.value
+            if decision == "queue_approval":
+                item["pending_approval"] = True
+            elif decision == "deny":
+                item["denied"] = True
+        rows = []
+        for item in runs.values():
+            row = dict(item)
+            row["agents"] = sorted(item["agents"])
+            row["tools"] = sorted(item["tools"])
+            if row["denied"]:
+                row["status"] = "denied"
+            elif row["pending_approval"]:
+                row["status"] = "awaiting_approval"
+            else:
+                row["status"] = "ok"
+            rows.append(row)
+        rows.sort(key=lambda r: r.get("latest_ts", ""), reverse=True)
+        return _json(200, {"runs": rows[:50]})
 
     @app.get("/api/proofs")
     def api_proofs(request: Request) -> Response:
@@ -271,6 +304,161 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         if deps.competitors is None:
             return _json(503, {"error": "competitors disabled"})
         return _json(200, {"competitors": [c.__dict__ for c in deps.competitors.list()]})
+
+    @app.post("/api/competitors")
+    async def api_competitors_add(request: Request) -> Response:
+        _require_session(request)
+        if deps.competitors is None:
+            return _json(503, {"error": "competitors disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            name = str(body.get("name") or "").strip()
+            url = str(body.get("url") or "").strip()
+            notes = str(body.get("notes") or "").strip()
+            if not name or not url:
+                return _json(400, {"error": "name and url required"})
+            if not (url.startswith("http://") or url.startswith("https://")):
+                return _json(400, {"error": "url must start with http:// or https://"})
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        comp = deps.competitors.add(name, url, notes=notes)
+        _receipt(
+            deps,
+            tool="competitors.add",
+            inputs={"name": name, "url": url},
+            outputs={"competitor_id": comp.id},
+        )
+        return _json(200, {"ok": True, "competitor": comp.__dict__})
+
+    @app.delete("/api/competitors/{competitor_id}")
+    def api_competitors_delete(request: Request, competitor_id: int) -> Response:
+        _require_session(request)
+        if deps.competitors is None:
+            return _json(503, {"error": "competitors disabled"})
+        removed = deps.competitors.delete(competitor_id)
+        if not removed:
+            return _json(404, {"error": "competitor not found"})
+        _receipt(
+            deps,
+            tool="competitors.delete",
+            inputs={"competitor_id": competitor_id},
+            outputs={"removed": True},
+        )
+        return _json(200, {"ok": True})
+
+    @app.get("/api/competitors/{competitor_id}/snapshots")
+    def api_competitor_snapshots(request: Request, competitor_id: int) -> Response:
+        _require_session(request)
+        if deps.competitors is None:
+            return _json(503, {"error": "competitors disabled"})
+        comp = deps.competitors.get(competitor_id)
+        if comp is None:
+            return _json(404, {"error": "competitor not found"})
+        snaps = deps.competitors.snapshots(competitor_id)
+        return _json(
+            200,
+            {
+                "competitor": comp.__dict__,
+                "snapshots": [_snapshot_json(s) for s in snaps],
+            },
+        )
+
+    @app.post("/api/competitors/{competitor_id}/snapshot")
+    def api_competitor_snapshot(request: Request, competitor_id: int) -> Response:
+        _require_session(request)
+        if deps.competitors is None:
+            return _json(503, {"error": "competitors disabled"})
+        if deps.search is None and deps.verifier is None:
+            # We need a fetcher; reuse the runtime-provided HttpxFetcher via deps.
+            pass
+        comp = deps.competitors.get(competitor_id)
+        if comp is None:
+            return _json(404, {"error": "competitor not found"})
+        fetcher = _resolve_fetcher(deps)
+        if fetcher is None:
+            return _json(503, {"error": "fetcher not configured"})
+        snap = deps.competitors.snapshot(
+            comp,
+            fetcher=fetcher,
+            memory=deps.memory,
+            ledger=deps.ledger,
+            run_id="dashboard:market",
+        )
+        return _json(200, {"ok": True, "snapshot": _snapshot_json(snap)})
+
+    @app.post("/api/memory/add")
+    async def api_memory_add(request: Request) -> Response:
+        _require_session(request)
+        if deps.memory is None:
+            return _json(503, {"error": "memory disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            kind_raw = str(body.get("kind") or "").strip()
+            key = str(body.get("key") or "").strip()
+            content = str(body.get("content") or "").strip()
+            proof_raw = str(body.get("proof_level") or "low").strip().lower()
+            sources_in = body.get("sources") or []
+            tags_in = body.get("tags") or []
+            if not kind_raw or not key or not content:
+                return _json(400, {"error": "kind, key and content required"})
+            if not isinstance(sources_in, list) or not isinstance(tags_in, list):
+                return _json(400, {"error": "sources and tags must be lists"})
+            sources = [str(s).strip() for s in sources_in if str(s).strip()]
+            tags = [str(t).strip() for t in tags_in if str(t).strip()]
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+
+        from midas.core.agents.summary import ProofLevel
+        from midas.core.memory import MemoryKind
+
+        try:
+            kind = MemoryKind(kind_raw)
+        except ValueError:
+            return _json(400, {"error": f"invalid kind: {kind_raw}"})
+        try:
+            proof = ProofLevel(proof_raw)
+        except ValueError:
+            return _json(400, {"error": f"invalid proof_level: {proof_raw}"})
+        if proof != ProofLevel.LOW and not sources:
+            return _json(
+                400,
+                {"error": "MEDIUM/HIGH proof requires at least one source URL"},
+            )
+        entry = deps.memory.remember(
+            kind, key, content, proof_level=proof, sources=sources, tags=tags
+        )
+        _receipt(
+            deps,
+            tool="memory.add",
+            inputs={"kind": kind.value, "key": key},
+            outputs={"id": entry.id, "proof_level": entry.proof_level.value},
+        )
+        return _json(200, {"ok": True, "entry": _memory_json(entry)})
+
+    @app.get("/api/memory/history")
+    def api_memory_history(request: Request, kind: str, key: str) -> Response:
+        _require_session(request)
+        if deps.memory is None:
+            return _json(503, {"error": "memory disabled"})
+        from midas.core.memory import MemoryKind
+
+        try:
+            kind_e = MemoryKind(kind)
+        except ValueError:
+            return _json(400, {"error": f"invalid kind: {kind}"})
+        rows = deps.memory.history(kind_e, key)
+        return _json(
+            200,
+            {
+                "kind": kind_e.value,
+                "key": key,
+                "entries": [_memory_history_json(r) for r in rows],
+            },
+        )
 
     @app.get("/api/assets")
     def api_assets(request: Request) -> Response:
@@ -985,6 +1173,483 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
     async def api_outcomes(request: Request) -> Response:
         return await outcomes(request)
 
+    @app.get("/api/export")
+    def api_export(request: Request) -> Response:
+        _require_session(request)
+        from dataclasses import asdict
+
+        from midas.core.memory import MemoryKind
+
+        manifest: dict[str, Any] = {
+            "version": 1,
+            "exported_ts": _utcnow(),
+            "memory": [],
+            "competitors": [],
+            "schedules": [],
+            "skills": [],
+        }
+        if deps.memory is not None:
+            entries: list[dict[str, Any]] = []
+            for k in MemoryKind:
+                entries.extend(
+                    _memory_history_json(row)
+                    for row in deps.memory.recall(
+                        kind=k, include_superseded=True, limit=10_000
+                    )
+                )
+            manifest["memory"] = entries
+        if deps.competitors is not None:
+            manifest["competitors"] = [
+                c.__dict__ for c in deps.competitors.list()
+            ]
+        if deps.schedule_store is not None:
+            manifest["schedules"] = [asdict(r) for r in deps.schedule_store.list()]
+        if deps.skill_registry is not None:
+            manifest["skills"] = [asdict(m) for m in deps.skill_registry.list()]
+        _receipt(
+            deps,
+            tool="export",
+            inputs={"kinds": ["memory", "competitors", "schedules", "skills"]},
+            outputs={"memory_count": len(manifest["memory"])},
+        )
+        return _json(200, manifest)
+
+    @app.post("/api/import")
+    async def api_import(request: Request) -> Response:
+        _require_session(request)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        if int(body.get("version") or 0) != 1:
+            return _json(400, {"error": "unsupported manifest version"})
+
+        # Imports are approval-gated: queue the manifest summary and let the operator
+        # approve from the Approvals page before any data is restored.
+        memory_count = len(body.get("memory") or [])
+        competitors_count = len(body.get("competitors") or [])
+        schedules_count = len(body.get("schedules") or [])
+        skills_count = len(body.get("skills") or [])
+        req = deps.queue.enqueue(
+            run_id="dashboard:import",
+            agent="dashboard",
+            tool="data.import",
+            action="restore_backup",
+            summary=(
+                f"Restore backup: {memory_count} memory · {competitors_count} competitors · "
+                f"{schedules_count} schedules · {skills_count} skills"
+            ),
+            payload={
+                "memory_count": memory_count,
+                "competitors_count": competitors_count,
+                "schedules_count": schedules_count,
+                "skills_count": skills_count,
+                "exported_ts": body.get("exported_ts"),
+            },
+        )
+        _receipt(
+            deps,
+            tool="data.import",
+            inputs={"manifest_version": 1},
+            outputs={"approval_id": req.id},
+            decision=Decision.QUEUE_APPROVAL,
+        )
+        return _json(200, {"ok": True, "approval_id": req.id})
+
+    @app.post("/api/council")
+    async def api_council(request: Request) -> Response:
+        _require_session(request)
+        if deps.router is None:
+            return _json(
+                503,
+                {"error": "router not configured — set providers to use the council"},
+            )
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            question = str(body.get("question") or "").strip()
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        if not question:
+            return _json(400, {"error": "question required"})
+
+        from midas.core.router.council import Council
+
+        members_cfg = list(getattr(deps.router.providers, "council", []) or [])
+        chairman_cfg = (
+            getattr(deps.router.providers, "chairman", None) or members_cfg[0:1]
+        )
+        if not members_cfg or not chairman_cfg:
+            return _json(
+                400,
+                {"error": "council/chairman models not configured in providers"},
+            )
+        chairman = (
+            chairman_cfg[0] if isinstance(chairman_cfg, list) else chairman_cfg
+        )
+        council = Council(deps.router, members_cfg, chairman)
+        try:
+            result = council.deliberate(
+                [{"role": "user", "content": question}],
+                run_id="dashboard:council",
+                est_usd_each=0.01,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface to UI, never crash dashboard
+            return _json(500, {"error": f"council failed: {exc.__class__.__name__}"})
+        return _json(
+            200,
+            {
+                "agreement": round(result.agreement, 4),
+                "escalate_to_human": result.escalate_to_human,
+                "answers": [a.text for a in result.answers],
+                "final": result.final.text,
+            },
+        )
+
+    @app.get("/api/skills")
+    def api_skills_list(request: Request) -> Response:
+        _require_session(request)
+        if deps.skill_registry is None:
+            return _json(200, {"skills": []})
+        from dataclasses import asdict
+
+        return _json(
+            200, {"skills": [asdict(m) for m in deps.skill_registry.list()]}
+        )
+
+    @app.post("/api/skills")
+    async def api_skills_create(request: Request) -> Response:
+        _require_session(request)
+        if deps.skill_registry is None:
+            return _json(503, {"error": "skill registry not configured"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            name = str(body.get("name") or "").strip()
+            summary = str(body.get("summary") or "").strip()
+            perms_in = body.get("permissions") or ["read"]
+            if not isinstance(perms_in, list):
+                return _json(400, {"error": "permissions must be a list"})
+            permissions = [str(p).strip() for p in perms_in if str(p).strip()]
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        if not name or not summary:
+            return _json(400, {"error": "name and summary required"})
+        try:
+            manifest = deps.skill_registry.create(
+                name=name, summary=summary, permissions=permissions
+            )
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="skills.create",
+            inputs={"name": name},
+            outputs={"sha256": manifest.sha256},
+        )
+        from dataclasses import asdict as _asdict
+
+        return _json(200, {"ok": True, "skill": _asdict(manifest)})
+
+    @app.delete("/api/skills/{name}")
+    def api_skills_delete(request: Request, name: str) -> Response:
+        _require_session(request)
+        if deps.skill_registry is None:
+            return _json(503, {"error": "skill registry not configured"})
+        import json as _json_mod
+        import shutil
+        from dataclasses import asdict
+
+        registry = deps.skill_registry
+        target = registry.skills_dir / name
+        rows = [m for m in registry.list() if m.name != name]
+        if len(rows) == len(registry.list()):
+            return _json(404, {"error": "skill not found"})
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+        registry.index_path.write_text(
+            _json_mod.dumps([asdict(m) for m in rows], indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        _receipt(
+            deps,
+            tool="skills.delete",
+            inputs={"name": name},
+            outputs={"removed": True},
+        )
+        return _json(200, {"ok": True})
+
+    @app.post("/api/skills/plan-download")
+    async def api_skills_plan_download(request: Request) -> Response:
+        _require_session(request)
+        if deps.skill_registry is None:
+            return _json(503, {"error": "skill registry not configured"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            url = str(body.get("url") or "").strip()
+            reason = str(body.get("reason") or "").strip()
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        from midas.flagship.skills import is_remote_skill_source
+
+        if not url:
+            return _json(400, {"error": "url required"})
+        if not is_remote_skill_source(url):
+            return _json(400, {"error": "url is not a remote skill source"})
+        req = deps.queue.enqueue(
+            run_id="dashboard:skills",
+            agent="dashboard",
+            tool="skills.plan_download",
+            action="download_remote_skill",
+            summary=f"Download remote skill from {url}",
+            payload={"url": url, "reason": reason or "operator-initiated"},
+        )
+        _receipt(
+            deps,
+            tool="skills.plan_download",
+            inputs={"url": url},
+            outputs={"approval_id": req.id},
+            decision=Decision.QUEUE_APPROVAL,
+        )
+        return _json(200, {"ok": True, "approval_id": req.id})
+
+    @app.post("/api/research")
+    async def api_research(request: Request) -> Response:
+        _require_session(request)
+        if deps.search is None or deps.fetcher is None:
+            return _json(503, {"error": "research requires search + fetcher"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            question = str(body.get("question") or "").strip()
+            k = int(body.get("k") or 5)
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        if not question:
+            return _json(400, {"error": "question required"})
+
+        from midas.core.web import research as run_research
+
+        result = run_research(
+            question, search=deps.search, fetcher=deps.fetcher, verifier=deps.verifier, k=k
+        )
+        _receipt(
+            deps,
+            tool="research.run",
+            inputs={"question": question, "k": k},
+            outputs={
+                "verified": result.verified_count,
+                "proof_level": result.proof_level.value,
+                "sources": [s.url for s in result.sources],
+            },
+        )
+        return _json(200, {"result": result.as_dict()})
+
+    def _autoskills_store() -> Any:
+        if deps.skill_registry is None or deps.ledger is None:
+            return None
+        from midas.flagship.autoskills import AutoSkills, AutoSkillsStore
+
+        state_dir = deps.skill_registry.root
+        store = AutoSkillsStore(state_dir / "autoskills.json")
+        return AutoSkills(
+            registry=deps.skill_registry,
+            ledger=deps.ledger,
+            queue=deps.queue,
+            store=store,
+            search=deps.search,
+        )
+
+    @app.get("/api/autoskills")
+    def api_autoskills_list(request: Request) -> Response:
+        _require_session(request)
+        auto = _autoskills_store()
+        if auto is None:
+            return _json(503, {"error": "auto-skills requires skill registry + ledger"})
+        auto.detect()
+        proposals = [
+            {
+                "proposal_id": p.proposal_id,
+                "run_id": p.run_id,
+                "name": p.name,
+                "summary": p.summary,
+                "local_only": p.local_only,
+                "status": p.status,
+                "steps": p.steps,
+                "skill_name": p.skill_name,
+            }
+            for p in auto._store.pending()  # noqa: SLF001
+        ]
+        return _json(200, {"proposals": proposals})
+
+    @app.post("/api/autoskills/{proposal_id}/accept")
+    def api_autoskills_accept(request: Request, proposal_id: str) -> Response:
+        _require_session(request)
+        auto = _autoskills_store()
+        if auto is None:
+            return _json(503, {"error": "auto-skills not available"})
+        try:
+            manifest = auto.accept(proposal_id)
+        except KeyError:
+            return _json(404, {"error": "unknown proposal"})
+        except PermissionError as exc:
+            return _json(403, {"error": str(exc)})
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        return _json(200, {"ok": True, "skill": {"name": manifest.name, "sha256": manifest.sha256}})
+
+    @app.post("/api/autoskills/{proposal_id}/discard")
+    async def api_autoskills_discard(request: Request, proposal_id: str) -> Response:
+        _require_session(request)
+        auto = _autoskills_store()
+        if auto is None:
+            return _json(503, {"error": "auto-skills not available"})
+        try:
+            body = await request.json() if request.headers.get("content-length") else {}
+            reason = str((body or {}).get("reason") or "")
+        except Exception:
+            reason = ""
+        try:
+            auto.discard(proposal_id, reason=reason)
+        except KeyError:
+            return _json(404, {"error": "unknown proposal"})
+        return _json(200, {"ok": True})
+
+    @app.post("/api/multimodal/inspect")
+    async def api_multimodal_inspect(request: Request) -> Response:
+        _require_session(request)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            path = str(body.get("path") or "").strip()
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        if not path:
+            return _json(400, {"error": "path required"})
+        from midas.flagship.multimodal import inspect_media
+
+        try:
+            result = inspect_media(path)
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="multimodal.inspect",
+            inputs={"path": path},
+            outputs={
+                "kind": result.kind,
+                "sha256": result.sha256,
+                "size_bytes": result.size_bytes,
+            },
+        )
+        return _json(200, {"ok": True, "media": result.as_dict()})
+
+    @app.get("/api/schedules")
+    def api_schedules_list(request: Request) -> Response:
+        _require_session(request)
+        if deps.schedule_store is None:
+            return _json(200, {"schedules": []})
+        from dataclasses import asdict
+
+        return _json(
+            200, {"schedules": [asdict(r) for r in deps.schedule_store.list()]}
+        )
+
+    @app.post("/api/schedules")
+    async def api_schedules_add(request: Request) -> Response:
+        _require_session(request)
+        if deps.schedule_store is None:
+            return _json(503, {"error": "schedule store not configured"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            name = str(body.get("name") or "").strip()
+            niche = str(body.get("niche") or "").strip()
+            at = str(body.get("at") or "09:00").strip()
+            mode = str(body.get("mode") or "deep").strip()
+            base_dir = str(body.get("base_dir") or ".").strip()
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        if not name or not niche:
+            return _json(400, {"error": "name and niche required"})
+        if mode not in {"fast", "deep", "war-room"}:
+            return _json(400, {"error": "invalid mode"})
+        from midas.flagship.schedule import daily_scan_recipe
+
+        try:
+            recipe = daily_scan_recipe(
+                name=name, niche=niche, at=at, base_dir=base_dir, mode=mode
+            )
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        deps.schedule_store.add(recipe)
+        _receipt(
+            deps,
+            tool="schedule.add",
+            inputs={"name": name, "niche": niche, "at": at, "mode": mode},
+            outputs={"cadence": recipe.cadence},
+        )
+        from dataclasses import asdict as _asdict
+
+        return _json(200, {"ok": True, "recipe": _asdict(recipe)})
+
+    @app.delete("/api/schedules/{name}")
+    def api_schedules_delete(request: Request, name: str) -> Response:
+        _require_session(request)
+        if deps.schedule_store is None:
+            return _json(503, {"error": "schedule store not configured"})
+        existing = [r for r in deps.schedule_store.list() if r.name == name]
+        if not existing:
+            return _json(404, {"error": "schedule not found"})
+        # ScheduleStore overwrites the whole list — write back without the deleted one.
+        import json as _json_mod
+        from dataclasses import asdict
+
+        remaining = [r for r in deps.schedule_store.list() if r.name != name]
+        deps.schedule_store.path.write_text(
+            _json_mod.dumps(
+                [asdict(r) for r in remaining], indent=2, ensure_ascii=False
+            ),
+            encoding="utf-8",
+        )
+        _receipt(
+            deps,
+            tool="schedule.delete",
+            inputs={"name": name},
+            outputs={"removed": True},
+        )
+        return _json(200, {"ok": True})
+
+    @app.get("/api/outcomes/history")
+    def api_outcomes_history(request: Request, move_key: str = "") -> Response:
+        _require_session(request)
+        if deps.memory is None:
+            return _json(503, {"error": "memory disabled"})
+        from midas.core.memory import MemoryKind
+        from midas.flagship.outcomes import summarize_history
+
+        move_key = move_key.strip()
+        if move_key:
+            summary = summarize_history(deps.memory, move_key)
+            entries = [
+                _memory_history_json(r)
+                for r in deps.memory.history(MemoryKind.RESULT, move_key)
+                if not r.superseded
+            ]
+            return _json(200, {"summary": summary, "entries": entries})
+        # Otherwise list all live RESULT memories, newest first.
+        rows = deps.memory.recall(kind=MemoryKind.RESULT, limit=50)
+        return _json(200, {"entries": [_memory_history_json(r) for r in rows]})
+
     # SPA catch-all — must stay LAST so every concrete route above wins first. Serves
     # the React shell for any client-side route React Router owns. Session-required.
     @app.get("/{spa_path:path}", response_class=HTMLResponse, include_in_schema=False)
@@ -1027,6 +1692,12 @@ def _approval_json(req: Any) -> dict[str, Any]:
     }
 
 
+def _utcnow() -> str:
+    from midas.core.receipts.models import utcnow_iso
+
+    return utcnow_iso()
+
+
 def _memory_json(row: Any) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -1038,6 +1709,39 @@ def _memory_json(row: Any) -> dict[str, Any]:
         "sources": row.sources,
         "tags": row.tags,
     }
+
+
+def _memory_history_json(row: Any) -> dict[str, Any]:
+    payload = _memory_json(row)
+    payload["superseded"] = bool(getattr(row, "superseded", False))
+    return payload
+
+
+def _snapshot_json(snap: Any) -> dict[str, Any]:
+    return {
+        "competitor_id": snap.competitor_id,
+        "name": snap.name,
+        "url": snap.url,
+        "status": snap.status,
+        "content_hash": snap.content_hash,
+        "changed": snap.changed,
+        "change_kind": snap.change_kind,
+        "excerpt": snap.excerpt,
+        "ts": snap.ts,
+    }
+
+
+def _resolve_fetcher(deps: DashboardDeps) -> Any:
+    if deps.fetcher is not None:
+        return deps.fetcher
+    # Lazy-construct a stdlib-friendly HttpxFetcher so the dashboard is usable
+    # even when the runtime didn't pre-wire a fetcher (tests inject their own).
+    try:
+        from midas.core.web.fetch import HttpxFetcher
+
+        return HttpxFetcher()
+    except Exception:
+        return None
 
 
 def _queue_move_approval(deps: DashboardDeps, report: Any, *, run_id: str) -> int | None:

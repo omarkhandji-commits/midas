@@ -51,6 +51,8 @@ actions:
     - install_skill_or_tool
     - delete_or_overwrite_foreign_file
     - irreversible_decision
+    - execute_code                 # Stream E: code.run sandbox always approval-tier
+    - write_spreadsheet            # Stream E: PDF→Excel + cell writes
 
   never:                       # hard-forbidden regardless of approval
     - spam

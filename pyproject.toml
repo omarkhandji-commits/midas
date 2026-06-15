@@ -42,6 +42,8 @@ web = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "sse-starlette>=2.1", "
 multimodal = ["pypdf>=4", "Pillow>=10"]
 telegram = ["python-telegram-bot>=21"]
 obs = ["opentelemetry-sdk>=1.25"]
+verify = ["pynacl>=1.5"]  # mirror of tools/verify deps — for users installing just the verifier
+sheets = ["openpyxl>=3.1"]  # Stream E2: PDF → Excel gated execution (.xlsx read/write)
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",

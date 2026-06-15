@@ -2,6 +2,7 @@
 
 from .cached import CachedFetcher, CachedSearchAdapter
 from .fetch import FetchedPage, Fetcher, HttpxFetcher, StaticFetcher
+from .research import ResearchResult, ResearchSource, research
 from .search import SearchAdapter, SearchHit, SearxngSearchAdapter, StaticSearchAdapter
 from .verify import SourceCheck, SourceVerifier
 
@@ -18,4 +19,7 @@ __all__ = [
     "SourceCheck",
     "CachedSearchAdapter",
     "CachedFetcher",
+    "research",
+    "ResearchResult",
+    "ResearchSource",
 ]

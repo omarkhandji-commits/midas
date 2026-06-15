@@ -35,3 +35,9 @@ Thumbs.db
 htmlcov/
 coverage.xml
 .shipvitals-evidence/
+
+# Editor / IDE state
+.claude/
+.idea/
+.vscode/
+*.swp

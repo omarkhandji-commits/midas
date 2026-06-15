@@ -33,6 +33,8 @@ from midas.core.web import (
     SourceVerifier,
     StaticSearchAdapter,
 )
+from midas.flagship.agent import AgentLoop, FsGuard, build_default_toolset
+from midas.flagship.agent.loop import llm_planner
 from midas.flagship.channel_settings import ChannelManager
 from midas.flagship.market import CompetitorStore
 from midas.flagship.provider_settings import (
@@ -41,6 +43,8 @@ from midas.flagship.provider_settings import (
     ProviderManager,
     SettingsStore,
 )
+from midas.flagship.schedule import ScheduleStore
+from midas.flagship.skills import SkillRegistry
 
 
 def _load_or_create_file_signer(state: Path) -> Signer:
@@ -73,6 +77,9 @@ class Runtime:
     providers: ProviderManager
     settings_store: SettingsStore
     channels: ChannelManager
+    schedule_store: ScheduleStore
+    skill_registry: SkillRegistry
+    fs_guard: FsGuard | None = None
 
     @property
     def has_providers(self) -> bool:
@@ -97,6 +104,30 @@ class Runtime:
             inputs=inputs,
             outputs=outputs,
             cost_usd=cost_usd,
+        )
+
+    def build_toolset(self, *, run_id: str = "") -> Any:
+        """Construct a Toolset wired with sentinel/ledger/approvals + the default tools."""
+        if self.fs_guard is None:
+            self.fs_guard = FsGuard.from_policy(self.base_dir, self.config.policy.filesystem)
+        return build_default_toolset(
+            sentinel=self.sentinel,
+            guard=self.fs_guard,
+            ledger=self.ledger,
+            approvals=self.approvals,
+            run_id=run_id,
+            search=self.search,
+            fetcher=self.fetcher,
+            verifier=self.verifier,
+        )
+
+    def agent_loop(self, *, run_id: str = "", max_steps: int = 8) -> AgentLoop:
+        """Build the default LLM-backed AgentLoop."""
+        toolset = self.build_toolset(run_id=run_id)
+        return AgentLoop(
+            toolset=toolset,
+            planner=llm_planner(self.router),
+            max_steps=max_steps,
         )
 
     def dashboard_deps(self, *, allowed_host: str = "127.0.0.1:8765") -> Any:
@@ -125,6 +156,9 @@ class Runtime:
             search=self.search,
             verifier=self.verifier,
             channels=self.channels,
+            fetcher=self.fetcher,
+            schedule_store=self.schedule_store,
+            skill_registry=self.skill_registry,
         )
 
 
@@ -158,6 +192,12 @@ def build_runtime(base_dir: str | Path) -> Runtime:
         state / "dashboard-settings.json",
         DashboardSettings.from_config(config),
     )
+    schedule_store = ScheduleStore(state / "schedules.json")
+    skill_registry = SkillRegistry(state)
+
+    # Workspace = the project dir. fsguard enforces policy.filesystem (workspace-only,
+    # deny_paths). All agent tools (fs/pdf/code/sheet) resolve paths through this.
+    fs_guard = FsGuard.from_policy(base, config.policy.filesystem)
 
     return Runtime(
         base_dir=base,
@@ -178,6 +218,9 @@ def build_runtime(base_dir: str | Path) -> Runtime:
         providers=providers,
         settings_store=settings_store,
         channels=channels,
+        schedule_store=schedule_store,
+        skill_registry=skill_registry,
+        fs_guard=fs_guard,
     )
 
 
