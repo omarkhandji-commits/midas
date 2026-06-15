@@ -122,11 +122,11 @@ class Runtime:
         )
 
     def agent_loop(self, *, run_id: str = "", max_steps: int = 8) -> AgentLoop:
-        """Build the default LLM-backed AgentLoop."""
+        """Build the default LLM-backed AgentLoop with memory wired into the planner."""
         toolset = self.build_toolset(run_id=run_id)
         return AgentLoop(
             toolset=toolset,
-            planner=llm_planner(self.router),
+            planner=llm_planner(self.router, memory=self.memory),
             max_steps=max_steps,
         )
 
@@ -159,6 +159,7 @@ class Runtime:
             fetcher=self.fetcher,
             schedule_store=self.schedule_store,
             skill_registry=self.skill_registry,
+            fs_guard=self.fs_guard,
         )
 
 

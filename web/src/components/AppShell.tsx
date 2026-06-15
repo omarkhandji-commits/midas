@@ -16,6 +16,7 @@ import {
   Sparkles,
   Settings as SettingsIcon,
   Shield,
+  FileBox,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +31,7 @@ const groups: NavGroup[] = [
       { to: "/", label: "Chat", icon: MessageSquare },
       { to: "/missions", label: "Missions", icon: Compass },
       { to: "/assets", label: "Asset Studio", icon: Wand2 },
+      { to: "/artifacts", label: "Artifacts", icon: FileBox },
       { to: "/approvals", label: "Approvals", icon: Inbox },
     ],
   },

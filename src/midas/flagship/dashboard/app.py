@@ -87,6 +87,7 @@ class DashboardDeps:
     fetcher: Any = None  # Fetcher used by Market Radar snapshot endpoints (optional)
     schedule_store: Any = None  # ScheduleStore for recipe CRUD (optional)
     skill_registry: Any = None  # SkillRegistry for skills CRUD (optional)
+    fs_guard: Any = None  # FsGuard for the Do-mode executor (optional)
     chat_est_usd: float = 0.02
     sse_interval_seconds: float = 1.5  # tests can shorten via deps; UI default is 1.5s
 
@@ -1042,14 +1043,15 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
     @app.post("/api/chat")
     async def api_chat(request: Request) -> Any:
         _require_session(request)
-        if deps.router is None or deps.sentinel is None:
-            return _json(503, {"error": "chat disabled"})
         try:
             body = await request.json()
             if not isinstance(body, dict):
                 return _json(400, {"error": "json object required"})
             message = str(body.get("message") or "").strip()
             history = body.get("history") if isinstance(body.get("history"), list) else []
+            mode = str(body.get("mode") or "chat").strip().lower()
+            if mode not in {"chat", "do"}:
+                return _json(400, {"error": "mode must be 'chat' or 'do'"})
             if not message:
                 return _json(400, {"error": "message required"})
         except Exception:
@@ -1057,7 +1059,19 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
 
         from starlette.responses import StreamingResponse
 
-        run_id = f"chat:{uuid.uuid4().hex[:12]}"
+        run_id = f"{mode}:{uuid.uuid4().hex[:12]}"
+
+        if mode == "do":
+            if deps.sentinel is None or deps.fs_guard is None:
+                return _json(503, {"error": "executor disabled"})
+            return StreamingResponse(
+                _do_mode_stream(deps, message, run_id),
+                media_type="text/event-stream",
+                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"},
+            )
+
+        if deps.router is None or deps.sentinel is None:
+            return _json(503, {"error": "chat disabled"})
 
         async def gen():
             yield _sse("start", {"run_id": run_id})
@@ -1106,6 +1120,59 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
             media_type="text/event-stream",
             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"},
         )
+
+    @app.get("/api/artifacts")
+    def api_artifacts(request: Request) -> Response:
+        """List every artifact materialized by `execute_approved_step`.
+
+        Walks the ledger for `*.executed` tool receipts. Each entry surfaces the
+        artifact's path, sha256, and `run_id` so the SPA can link back to the
+        Proof Ledger for the full chain.
+        """
+        _require_session(request)
+        if deps.ledger is None:
+            return _json(200, {"artifacts": []})
+        executed: list[dict[str, Any]] = []
+        for receipt in deps.ledger:
+            tool = receipt.body.tool
+            if not tool.endswith(".executed"):
+                continue
+            executed.append(
+                {
+                    "seq": receipt.body.seq,
+                    "run_id": receipt.body.run_id,
+                    "kind": tool.removesuffix(".executed"),
+                    "ts": receipt.body.ts,
+                    "hash": receipt.hash,
+                }
+            )
+        return _json(200, {"artifacts": list(reversed(executed))[:100]})
+
+    @app.post("/api/execute/{approval_id}")
+    async def api_execute(request: Request, approval_id: int) -> Response:
+        """Materialize an APPROVED gated step. Returns the executed receipt summary."""
+        _require_session(request)
+        from midas.core.approvals.queue import ApprovalStatus
+
+        if deps.ledger is None or deps.fs_guard is None:
+            return _json(503, {"error": "executor not available"})
+        req = deps.queue.get(approval_id)
+        if req is None:
+            return _json(404, {"error": "unknown approval"})
+        if req.status != ApprovalStatus.APPROVED:
+            return _json(
+                409,
+                {"error": f"approval is {req.status.value}, must be approved"},
+            )
+        from midas.flagship.agent.execute import execute_approved_step
+
+        try:
+            result = execute_approved_step(_dashboard_runtime_shim(deps), req)
+        except KeyError:
+            return _json(400, {"error": "no executor for this tool"})
+        except (ValueError, PermissionError) as exc:
+            return _json(400, {"error": str(exc)})
+        return _json(200, {"ok": True, "result": result})
 
     @app.get("/events")
     async def events(request: Request) -> Any:
@@ -1660,6 +1727,140 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         return HTMLResponse(_SPA_INDEX.read_text(encoding="utf-8"))
 
     return app
+
+
+async def _do_mode_stream(deps: DashboardDeps, task: str, run_id: str) -> Any:
+    """Stream AgentLoop steps as SSE for the Chat page's Do mode.
+
+    Yields one ``step`` event per AgentStep (tool, decision, ran, approval_id,
+    output_summary) and one ``done`` event at the end of the run, plus an
+    ``approval`` event mirroring any queued ApprovalRequest so the existing
+    Chat UI's approval pane can pick them up.
+    """
+    from midas.core.budget.fuse import BudgetExceeded as _BudgetExceeded
+    from midas.flagship.agent import AgentLoop, build_default_toolset
+
+    yield _sse("start", {"run_id": run_id, "mode": "do"})
+
+    if deps.fs_guard is None or deps.sentinel is None:
+        yield _sse("error", {"code": "executor_unavailable"})
+        return
+
+    try:
+        toolset = build_default_toolset(
+            sentinel=deps.sentinel,
+            guard=deps.fs_guard,
+            ledger=deps.ledger,
+            approvals=deps.queue,
+            run_id=run_id,
+            search=deps.search,
+            fetcher=deps.fetcher,
+            verifier=deps.verifier,
+        )
+        from midas.flagship.agent.loop import llm_planner
+
+        loop = AgentLoop(
+            toolset=toolset,
+            planner=(
+                llm_planner(deps.router, memory=deps.memory)
+                if deps.router is not None
+                else _refuse_planner
+            ),
+            max_steps=6,
+            agent_name="dashboard-do",
+        )
+    except Exception:
+        yield _sse("error", {"code": "executor_init_failed"})
+        return
+
+    try:
+        transcript = loop.run(task)
+    except _BudgetExceeded as exc:
+        yield _sse(
+            "error",
+            {
+                "code": "budget_exceeded",
+                "scope": exc.scope,
+                "projected": round(exc.projected, 6),
+                "cap": round(exc.cap, 6),
+            },
+        )
+        return
+    except Exception:
+        yield _sse("error", {"code": "do_failed"})
+        return
+
+    for step in transcript.steps:
+        yield _sse(
+            "step",
+            {
+                "tool": step.tool,
+                "decision": step.decision,
+                "ran": step.ran,
+                "approval_id": step.approval_id,
+                "output_summary": step.output_summary,
+                "error": step.error,
+            },
+        )
+        if step.approval_id is not None:
+            req = deps.queue.get(step.approval_id)
+            if req is not None:
+                yield _sse("approval", _approval_json(req))
+
+    yield _sse(
+        "done",
+        {
+            "run_id": run_id,
+            "stopped_reason": transcript.stopped_reason,
+            "step_count": len(transcript.steps),
+            "queued_approvals": transcript.queued_approvals,
+        },
+    )
+
+
+def _refuse_planner(task: str, transcript: Any) -> dict[str, Any]:
+    """Fallback planner when no LLM is configured — reuses the offline planner."""
+    from midas.flagship.agent.loop import offline_artifact_planner
+
+    return offline_artifact_planner(task, transcript)
+
+
+class _RuntimeShim:
+    """Minimal runtime-shaped object for ``execute_approved_step`` from the dashboard."""
+
+    def __init__(self, deps: DashboardDeps) -> None:
+        self.ledger = deps.ledger
+        self.approvals = deps.queue
+        self.fs_guard = deps.fs_guard
+
+    def append_receipt(
+        self,
+        *,
+        run_id: str,
+        agent: str,
+        tool: str,
+        inputs: Any,
+        outputs: Any,
+        decision: Any = None,
+        cost_usd: float = 0.0,
+    ) -> None:
+        if self.ledger is None:
+            return
+        from midas.core.receipts.models import Decision
+
+        self.ledger.append(
+            run_id=run_id,
+            agent=agent,
+            tool=tool,
+            decision=decision or Decision.ALLOW,
+            inputs=inputs,
+            outputs=outputs,
+            cost_usd=cost_usd,
+        )
+
+
+def _dashboard_runtime_shim(deps: DashboardDeps) -> Any:
+    return _RuntimeShim(deps)
 
 
 def _resolve(deps: DashboardDeps, req_id: int, *, approve: bool) -> Response:

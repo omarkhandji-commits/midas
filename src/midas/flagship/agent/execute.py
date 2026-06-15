@@ -124,6 +124,47 @@ _TOOL_TO_KIND = {
 }
 
 
+def _execute_json_write(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    """JSON writes route through the generic fs.write executor."""
+    return _execute_fs_write(runtime, request)
+
+
+def _execute_csv_write(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    return _execute_fs_write(runtime, request)
+
+
+def _execute_docx(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    from .tools.docx import execute_docx
+
+    payload = request.payload or {}
+    plan = execute_docx(
+        runtime.fs_guard,
+        path=str(payload.get("path") or ""),
+        title=str(payload.get("title") or "Document"),
+        body=str(payload.get("body") or ""),
+    )
+    runtime.ledger.append(
+        run_id=request.run_id,
+        agent="execute",
+        tool="docx.draft.executed",
+        decision=Decision.ALLOW,
+        inputs={"approval_id": request.id, "path": plan.path},
+        outputs={
+            "path": plan.path,
+            "bytes": plan.bytes_len,
+            "sha256_new": plan.sha256_new,
+            "sha256_prev": plan.sha256_prev,
+        },
+    )
+    return {
+        "kind": "docx",
+        "path": plan.path,
+        "bytes_len": plan.bytes_len,
+        "sha256_new": plan.sha256_new,
+        "sha256_prev": plan.sha256_prev,
+    }
+
+
 def _execute_artifact(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     from .tools.artifact import execute_artifact
 
@@ -180,4 +221,7 @@ _HANDLERS = {
     "invoice.draft": _execute_artifact,
     "voice.draft": _execute_artifact,
     "code.draft": _execute_artifact,
+    "json.write": _execute_json_write,
+    "csv.write": _execute_csv_write,
+    "docx.draft": _execute_docx,
 }

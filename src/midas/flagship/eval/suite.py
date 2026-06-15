@@ -26,7 +26,7 @@ from midas.core.config.models import ProviderEntry, ProvidersConfig, RoleConfig
 from midas.core.context import ContextBudget, SafeContextCompressor
 from midas.core.eval import CaseResult, Eval, Suite
 from midas.core.providers import diagnose_providers
-from midas.core.receipts.models import Taint
+from midas.core.receipts.models import Decision, Taint
 from midas.core.router import ChatResult, Council, LLMRouter
 from midas.core.sentinel import Sentinel
 from midas.core.web import SourceVerifier, StaticFetcher, StaticSearchAdapter, research
@@ -303,6 +303,177 @@ def _eval_operator_autonomy_guardrails() -> list[CaseResult]:
     return cases
 
 
+def _eval_replay_and_signed_skills() -> list[CaseResult]:
+    """Stream F5: replay is deterministic; signed skill bundles detect tampering."""
+    from midas.core.receipts import ReceiptLedger
+    from midas.core.receipts import Signer as _Signer
+    from midas.flagship.replay import replay_run
+    from midas.flagship.signed_skills import (
+        export_signed_skill,
+        verify_signed_skill,
+    )
+
+    with tempfile.TemporaryDirectory() as td:
+        td_path = Path(td)
+        ledger = ReceiptLedger(td_path / "r.jsonl", _Signer.from_hex_seed("5a" * 32))
+        for tool in ("fs.read", "research.run"):
+            ledger.append(
+                run_id="rep", agent="a", tool=tool,
+                decision=Decision.ALLOW, inputs={}, outputs={},
+            )
+        a = replay_run(ledger, "rep")
+        b = replay_run(ledger, "rep")
+        replay_deterministic = a.signature() == b.signature() and a.step_count == 2
+
+        skill_src = td_path / "skill"
+        skill_src.mkdir()
+        (skill_src / "SKILL.md").write_text("# demo\n", encoding="utf-8")
+        signer = _Signer.from_hex_seed("5b" * 32)
+        bundle = export_signed_skill(skill_src, td_path / "bundle", signer, name="demo")
+        ok_first = verify_signed_skill(bundle).ok
+        (bundle / "SKILL.md").write_text("# demo (tampered)\n", encoding="utf-8")
+        ok_after = verify_signed_skill(bundle).ok
+
+    return [
+        CaseResult(
+            name="replay shape is deterministic across calls",
+            passed=replay_deterministic,
+            expected="identical signatures, step_count=2",
+            actual=f"deterministic={replay_deterministic}",
+        ),
+        CaseResult(
+            name="signed skill bundle verifies, tamper is caught",
+            passed=ok_first and (not ok_after),
+            expected="ok=True before tamper, ok=False after",
+            actual=f"before={ok_first}, after={ok_after}",
+        ),
+    ]
+
+
+def _eval_roi_and_proof_links() -> list[CaseResult]:
+    """Stream F4: ROI cites receipts only; proof-link HTML verifies offline."""
+    import re as _re
+
+    from midas.core.memory import MemoryStore
+    from midas.core.receipts import ReceiptLedger
+    from midas.core.receipts import Signer as _Signer
+    from midas.flagship.proof_link import export_proof_link
+    from midas.flagship.roi import build_outcomes_index, compute_run_roi
+
+    with tempfile.TemporaryDirectory() as td:
+        td_path = Path(td)
+        signer = _Signer.from_hex_seed("4f" * 32)  # arbitrary deterministic seed
+        ledger = ReceiptLedger(td_path / "r.jsonl", signer)
+        ledger.append(
+            run_id="run-1", agent="a", tool="t",
+            decision=Decision.ALLOW, inputs={}, outputs={}, cost_usd=0.02,
+        )
+        memory = MemoryStore(":memory:")
+        memory.record_result("run-1", outcome="closed", metrics={"revenue": 100.0})
+
+        report = compute_run_roi(ledger, build_outcomes_index(memory))
+        recorded = [r for r in report.runs if r.run_id == "run-1"]
+
+        # Run without a recorded outcome — revenue MUST stay 0, not invented.
+        ledger.append(
+            run_id="run-unsourced", agent="a", tool="t",
+            decision=Decision.ALLOW, inputs={}, outputs={}, cost_usd=0.05,
+        )
+        report2 = compute_run_roi(ledger, build_outcomes_index(memory))
+        unsourced = [r for r in report2.runs if r.run_id == "run-unsourced"][0]
+
+        html = export_proof_link(ledger, public_key_hex=signer.public_key_hex)
+
+    return [
+        CaseResult(
+            name="ROI joins cost (receipt) with revenue (outcome)",
+            passed=bool(recorded) and recorded[0].revenue_usd == 100.0,
+            expected="revenue from recorded outcome",
+            actual=f"revenue={recorded[0].revenue_usd if recorded else 'missing'}",
+        ),
+        CaseResult(
+            name="ROI never invents revenue for an unrecorded run",
+            passed=unsourced.revenue_usd == 0.0,
+            expected="revenue=0 with no recorded outcome",
+            actual=f"revenue={unsourced.revenue_usd}",
+        ),
+        CaseResult(
+            name="proof-link HTML imports nothing from midas.*",
+            passed=("midas_verify" not in html) and ("<script src=" not in html),
+            expected="self-contained inline verifier",
+            actual=(
+                "ok"
+                if ("midas_verify" not in html) and ("<script src=" not in html)
+                else "leaks"
+            ),
+        ),
+        CaseResult(
+            name="proof-link contains every receipt + the public key",
+            passed=(
+                signer.public_key_hex in html
+                and len(_re.findall(r'"seq":', html)) >= 2
+            ),
+            expected="pub key + ≥2 receipts embedded",
+            actual="ok" if signer.public_key_hex in html else "missing pub key",
+        ),
+    ]
+
+
+def _eval_memory_grounded_planner() -> list[CaseResult]:
+    """Stream F3: the AgentLoop planner is grounded in operator memory."""
+    from midas.core.memory import MemoryKind, MemoryStore
+    from midas.core.router.models import ChatResult
+    from midas.flagship.agent.loop import AgentTranscript, llm_planner
+
+    class _SpyRouter:
+        def __init__(self) -> None:
+            self.captured: list[str] = []
+
+        def complete(self, messages: list[dict[str, str]], **_kw: Any) -> ChatResult:
+            self.captured.append(messages[0]["content"])
+            return ChatResult(
+                text='{"done": true, "summary": "ok"}',
+                model="stub",
+                prompt_tokens=1,
+                completion_tokens=1,
+                cost_usd=0.0,
+            )
+
+    # In-memory SQLite avoids the Windows TemporaryDirectory cleanup race when
+    # the connection still holds the file handle.
+    memory = MemoryStore(":memory:")
+    memory.remember(MemoryKind.USER, "voice", "Operator prefers sober copy, no emojis.")
+    router = _SpyRouter()
+    planner = llm_planner(router, memory=memory)
+    planner("Draft an email.", AgentTranscript(task="Draft an email."))
+    system_with = router.captured[-1]
+
+    memory_off = MemoryStore(":memory:")
+    router2 = _SpyRouter()
+    planner_off = llm_planner(router2, memory=memory_off)
+    planner_off("Draft an email.", AgentTranscript(task="Draft an email."))
+    system_without = router2.captured[-1]
+
+    return [
+        CaseResult(
+            name="planner prompt includes operator memory when seeded",
+            passed=("Operator memory" in system_with and "sober copy" in system_with),
+            expected="memory section in system prompt",
+            actual=(
+                "found"
+                if ("Operator memory" in system_with and "sober copy" in system_with)
+                else "missing"
+            ),
+        ),
+        CaseResult(
+            name="planner omits memory section when store is empty",
+            passed="Operator memory" not in system_without,
+            expected="no memory section",
+            actual="absent" if "Operator memory" not in system_without else "leaked",
+        ),
+    ]
+
+
 def _eval_gated_executor(policy_path: str | Path) -> list[CaseResult]:
     """Stream E1: every mutating tool is APPROVE-tier, never runs inline."""
     from midas.flagship.agent import build_default_toolset
@@ -540,6 +711,30 @@ def build_suite(policy_path: str | Path) -> Suite:
                     "hallucinated URLs stay LOW."
                 ),
                 run=_eval_web_research,
+            ),
+            Eval(
+                name="replay + signed-skill tamper detection",
+                description=(
+                    "Stream F5: replay reproduces transcript shape from receipts; "
+                    "signed skill bundles detect byte tampering."
+                ),
+                run=_eval_replay_and_signed_skills,
+            ),
+            Eval(
+                name="ROI + proof-link integrity",
+                description=(
+                    "Stream F4: ROI cites only receipted cost + recorded outcomes; "
+                    "proof-link HTML verifies offline and imports nothing from MIDAS."
+                ),
+                run=_eval_roi_and_proof_links,
+            ),
+            Eval(
+                name="planner grounded in operator memory",
+                description=(
+                    "Stream F3: the LLM planner system prompt includes the operator's "
+                    "USER/BUSINESS/DECISION memory; absent when no memory is configured."
+                ),
+                run=_eval_memory_grounded_planner,
             ),
             Eval(
                 name="gated executor — no mutation without approval",

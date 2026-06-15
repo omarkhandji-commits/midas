@@ -88,10 +88,11 @@ class FsGuard:
         resolved_norm = _norm(resolved)
         workspace_norm = _norm(self.workspace)
 
-        if self.workspace_only and not (
+        inside_workspace = (
             resolved_norm == workspace_norm
             or resolved_norm.startswith(workspace_norm + "/")
-        ):
+        )
+        if self.workspace_only and not inside_workspace:
             raise FsGuardError(
                 f"path escapes the workspace sandbox: {raw} → {resolved}"
             )
@@ -99,6 +100,13 @@ class FsGuard:
         for denied in self.deny_paths:
             denied_norm = _norm(Path(denied))
             if not denied_norm:
+                continue
+            # Skip deny entries that are an ANCESTOR of the workspace. Otherwise a
+            # broad deny like ``~`` would block the entire workspace just because the
+            # project happens to live under home — the workspace is the trusted
+            # sandbox. Deny entries strictly inside the workspace still apply so the
+            # operator can sub-fence parts of their own tree.
+            if workspace_norm == denied_norm or workspace_norm.startswith(denied_norm + "/"):
                 continue
             if resolved_norm == denied_norm or resolved_norm.startswith(denied_norm + "/"):
                 raise FsGuardError(f"path is on the deny-list ({denied}): {raw}")

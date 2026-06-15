@@ -41,6 +41,9 @@ voice_app = typer.Typer(
 keys_app = typer.Typer(
     help="Inspect public signing keys (Receipt v1).", no_args_is_help=True
 )
+proof_app = typer.Typer(
+    help="Export portable proof links (offline-verifiable HTML).", no_args_is_help=True
+)
 
 app.add_typer(approvals_app, name="approvals")
 app.add_typer(memory_app, name="memory")
@@ -53,6 +56,7 @@ app.add_typer(skills_app, name="skills")
 app.add_typer(media_app, name="media")
 app.add_typer(voice_app, name="voice")
 app.add_typer(keys_app, name="keys")
+app.add_typer(proof_app, name="proof")
 
 
 @keys_app.command("export-public")
@@ -745,6 +749,226 @@ def execute(
         )
     result = execute_approved_step(rt, request)
     typer.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@app.command()
+def demo(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+    out_dir: str = typer.Option(
+        "demo-output", "--out", help="Workspace dir where the demo writes its artifacts."
+    ),
+) -> None:
+    """Zero-config, fully-offline demo. Produces an artifact + a proof link in one go.
+
+    Runs WITHOUT a configured LLM provider — uses the deterministic refuse-planner
+    fallback so the loop always produces an ``artifact.text`` proposal. The
+    operator can then run ``midas execute <approval_id>`` to materialize it and
+    ``midas proof export demo-proof.html`` to share the signed receipt chain.
+    """
+    from midas.flagship.agent import AgentLoop, build_default_toolset
+    from midas.flagship.agent.execute import execute_approved_step
+    from midas.flagship.agent.loop import offline_artifact_planner
+    from midas.flagship.proof_link import export_proof_link
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    if rt.fs_guard is None:
+        raise typer.BadParameter("fs_guard not initialized — run `midas setup` first")
+
+    # The demo writes its artifact into a sub-directory of the workspace so it
+    # does not collide with anything the operator already has.
+    workspace_target = rt.fs_guard.resolve(out_dir)
+    workspace_target.mkdir(parents=True, exist_ok=True)
+
+    toolset = build_default_toolset(
+        sentinel=rt.sentinel, guard=rt.fs_guard,
+        ledger=rt.ledger, approvals=rt.approvals,
+        run_id="demo:run",
+        search=rt.search, fetcher=rt.fetcher, verifier=rt.verifier,
+    )
+    loop = AgentLoop(
+        toolset=toolset,
+        planner=offline_artifact_planner,  # deterministic, no LLM, never refuses
+        max_steps=3,
+        agent_name="demo",
+    )
+    transcript = loop.run("Produce a one-page MIDAS proof-of-concept artifact.")
+    typer.echo(json.dumps(transcript.to_json(), indent=2, ensure_ascii=False))
+
+    # Auto-approve the one artifact the refuse-planner queues — the demo's whole
+    # point is to surface the END-TO-END flow with no human in the loop.
+    if not transcript.queued_approvals:
+        typer.echo("Demo produced no approvals — nothing to execute.")
+        raise typer.Exit(code=1)
+    approval_id = transcript.queued_approvals[0]
+    rt.approvals.approve(approval_id, by="cli")
+    request = rt.approvals.get(approval_id)
+    if request is None:
+        raise typer.BadParameter(f"approval #{approval_id} vanished")
+    result = execute_approved_step(rt, request)
+    typer.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+    # Export the proof link for this run.
+    proof_path = rt.fs_guard.resolve(f"{out_dir}/demo-proof.html")
+    proof_path.parent.mkdir(parents=True, exist_ok=True)
+    proof_path.write_text(
+        export_proof_link(
+            rt.ledger, public_key_hex=rt.ledger.public_key_hex, run_id="demo:run"
+        ),
+        encoding="utf-8",
+    )
+    typer.echo(f"\nProof link: {proof_path}")
+    typer.echo("Open it in any browser — no install required.")
+
+
+@app.command()
+def replay(
+    run_id: str = typer.Argument(..., help="run_id from a past receipt."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Reconstruct a past run's transcript shape from its signed receipts."""
+    from midas.flagship.replay import format_replay, replay_run
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    transcript = replay_run(rt.ledger, run_id)
+    typer.echo(format_replay(transcript))
+
+
+@skills_app.command("export")
+def skills_export(
+    name: str = typer.Argument(..., help="Local skill name (slug) to bundle."),
+    output: str = typer.Argument(..., help="Output directory for the signed bundle."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Sign a local skill and export it as a portable, verifiable bundle."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.signed_skills import export_signed_skill
+
+    rt = build_runtime(base_dir)
+    if rt.skill_registry is None:
+        raise typer.BadParameter("skill registry not initialized")
+    source = rt.skill_registry.skills_dir / name
+    if not source.is_dir():
+        raise typer.BadParameter(f"unknown local skill: {name}")
+    signer = rt.ledger._signer  # noqa: SLF001 - reuse the install's signing identity
+    dst = rt.fs_guard.resolve(output) if rt.fs_guard else Path(output)
+    export_signed_skill(source, dst, signer, name=name)
+    rt.append_receipt(
+        run_id=f"skills:export:{name}",
+        agent="cli",
+        tool="skills.export",
+        inputs={"name": name, "output": str(dst)},
+        outputs={"public_key_hex": signer.public_key_hex},
+    )
+    typer.echo(f"Wrote signed bundle to {dst} (pub: {signer.public_key_hex[:16]}…)")
+
+
+@skills_app.command("verify")
+def skills_verify(
+    bundle: str = typer.Argument(..., help="Path to a signed skill bundle."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Verify a signed skill bundle's manifest, file hashes, and signature."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.signed_skills import verify_signed_skill
+
+    rt = build_runtime(base_dir)
+    target = rt.fs_guard.resolve(bundle) if rt.fs_guard else Path(bundle)
+    result = verify_signed_skill(target)
+    if result.ok:
+        typer.echo(
+            f"OK — {result.manifest.name if result.manifest else '?'} "
+            f"(pub: {(result.public_key_hex or '')[:16]}…)"
+        )
+    else:
+        typer.echo(f"FAIL — {result.error}")
+        raise typer.Exit(code=1)
+
+
+@skills_app.command("import")
+def skills_import(
+    bundle: str = typer.Argument(..., help="Path to a verified signed skill bundle."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Queue approval to install a signed skill bundle (verifies first)."""
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.signed_skills import verify_signed_skill
+
+    rt = build_runtime(base_dir)
+    target = rt.fs_guard.resolve(bundle) if rt.fs_guard else Path(bundle)
+    result = verify_signed_skill(target)
+    if not result.ok:
+        raise typer.BadParameter(f"verification failed: {result.error}")
+    req = rt.approvals.enqueue(
+        run_id=f"skills:import:{result.manifest.name if result.manifest else 'unknown'}",
+        agent="cli",
+        tool="skills.import_signed",
+        action="install_skill_or_tool",
+        summary=f"Install signed skill {result.manifest.name if result.manifest else 'unknown'}",
+        payload={
+            "bundle": str(target),
+            "public_key_hex": result.public_key_hex,
+            "manifest_name": result.manifest.name if result.manifest else None,
+        },
+    )
+    rt.append_receipt(
+        run_id=f"skills:import:{result.manifest.name if result.manifest else 'unknown'}",
+        agent="cli",
+        tool="skills.import_signed",
+        decision=Decision.QUEUE_APPROVAL,
+        inputs={"bundle": str(target)},
+        outputs={"approval_id": req.id},
+    )
+    typer.echo(f"Verified. Approval queued: #{req.id}")
+
+
+@app.command()
+def roi(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Print a per-run ROI table — cost from receipts, revenue from outcomes."""
+    from midas.flagship.roi import build_outcomes_index, compute_run_roi, format_roi_report
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    outcomes = build_outcomes_index(rt.memory)
+    report = compute_run_roi(rt.ledger, outcomes)
+    typer.echo(format_roi_report(report))
+
+
+@proof_app.command("export")
+def proof_export(
+    output: str = typer.Argument(..., help="Path to write the proof-link HTML."),
+    run_id: str | None = typer.Option(
+        None, "--run-id", help="Restrict the proof link to one run. Default = full chain."
+    ),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Export a portable, offline-verifiable proof-link HTML for the operator's chain."""
+    from midas.flagship.proof_link import export_proof_link
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    html = export_proof_link(
+        rt.ledger,
+        public_key_hex=rt.ledger.public_key_hex,
+        run_id=run_id,
+    )
+    if rt.fs_guard is not None:
+        target = rt.fs_guard.resolve(output)
+    else:
+        target = Path(output)
+        target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(html, encoding="utf-8")
+    rt.append_receipt(
+        run_id=run_id or "proof:full",
+        agent="cli",
+        tool="proof.export",
+        inputs={"output": str(target), "run_id": run_id},
+        outputs={"bytes": len(html), "path": str(target)},
+    )
+    typer.echo(f"Wrote {target}")
 
 
 @app.command()

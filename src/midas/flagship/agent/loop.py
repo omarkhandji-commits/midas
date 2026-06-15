@@ -87,8 +87,39 @@ class AgentLoop:
         self._agent = agent_name
 
     def run(self, task: str) -> AgentTranscript:
-        transcript = AgentTranscript(task=task)
-        for step_index in range(self._max_steps):
+        return self._drive(AgentTranscript(task=task))
+
+    def resume(
+        self,
+        transcript: AgentTranscript,
+        *,
+        approval_outcome: dict[str, Any] | None = None,
+    ) -> AgentTranscript:
+        """Continue a transcript paused at an approval.
+
+        Pass the executor's outcome (path, sha256, kind) under
+        ``approval_outcome`` so the planner sees the gated step actually landed.
+        Adds an ``executed`` synthetic step to the transcript, then drives the
+        remaining iterations up to ``max_steps - len(transcript.steps)``.
+        """
+        if approval_outcome is not None:
+            transcript.steps.append(
+                AgentStep(
+                    tool=f"{approval_outcome.get('kind', 'gated')}.executed",
+                    inputs={},
+                    ran=True,
+                    decision="allow",
+                    output_summary=_shape_summary(approval_outcome),
+                )
+            )
+        # Clear the "awaiting approval" stop reason so the loop continues.
+        transcript.stopped_reason = None
+        return self._drive(transcript)
+
+    def _drive(self, transcript: AgentTranscript) -> AgentTranscript:
+        already_done = len(transcript.steps)
+        remaining = max(0, self._max_steps - already_done)
+        for step_index in range(remaining):
             # Loop-breaker tick — canonical state hash binds the run to its progress.
             try:
                 self._breaker.tick(
@@ -100,7 +131,7 @@ class AgentLoop:
                 return transcript
 
             try:
-                plan = self._planner(task, transcript)
+                plan = self._planner(transcript.task, transcript)
             except Exception as exc:  # noqa: BLE001 - any planner crash stops the loop
                 transcript.stopped_reason = f"planner error: {exc}"
                 return transcript
@@ -212,17 +243,45 @@ _PLANNER_SYSTEM = (
 )
 
 
-def llm_planner(router: Any, *, role: str = "cheap", est_usd: float = 0.005) -> Planner:
-    """Build a planner that calls the router and parses one JSON plan per step."""
+def llm_planner(
+    router: Any,
+    *,
+    role: str = "cheap",
+    est_usd: float = 0.005,
+    memory: Any = None,
+) -> Planner:
+    """Build a planner that calls the router and parses one JSON plan per step.
+
+    If ``memory`` exposes ``context_pack(query=...)``, the operator's relevant
+    memories (USER/BUSINESS/DECISION/RESULT/MARKET/ERROR namespaces) are passed
+    into the system prompt so MIDAS visibly "knows you" across runs.
+    """
 
     def _plan(task: str, transcript: AgentTranscript) -> dict[str, Any]:
         history_summary = "\n".join(
             f"- {s.tool}({_short(s.inputs)}) -> {s.decision} {s.output_summary}"
             for s in transcript.steps
         )
+        memory_context = ""
+        if memory is not None and hasattr(memory, "context_pack"):
+            try:
+                # Pass None so the planner always gets the operator's recent USER /
+                # BUSINESS / DECISION context. Narrow keyword filtering belongs in a
+                # ranker, not here — a broad SQL LIKE on the task tends to return
+                # nothing and hide the "knows you" signal.
+                memory_context = memory.context_pack(query=None) or ""
+            except Exception:  # noqa: BLE001 - memory failures must not poison the planner
+                memory_context = ""
+        system = _PLANNER_SYSTEM
+        if memory_context.strip():
+            system = (
+                _PLANNER_SYSTEM
+                + "\n\nOperator memory (use as context, not as proof unless sourced):\n"
+                + memory_context.strip()
+            )
         user = f"Task: {task}\nHistory:\n{history_summary or '(none)'}\nReturn the next JSON now."
         messages = [
-            {"role": "system", "content": _PLANNER_SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
         res = router.complete(
@@ -231,6 +290,30 @@ def llm_planner(router: Any, *, role: str = "cheap", est_usd: float = 0.005) -> 
         return _parse_plan(res.text)
 
     return _plan
+
+
+def offline_artifact_planner(
+    task: str, transcript: AgentTranscript
+) -> dict[str, Any]:
+    """Deterministic, no-LLM planner — always produces one ``artifact.text`` plan.
+
+    Used by ``midas demo`` and as the fallback when no provider is configured.
+    Closes the never-refuse contract without requiring a router.
+    """
+    if transcript.steps:
+        return {"done": True, "summary": "offline planner: one artifact then done"}
+    return {
+        "tool": "artifact.text",
+        "inputs": {
+            "path": "do-output.md",
+            "content": (
+                f"# MIDAS — offline draft\n\nTask: {task}\n\n"
+                "This artifact was produced without an LLM (the deterministic "
+                "offline planner runs when no provider is configured). Configure "
+                "a provider under Settings to enable the full planner."
+            ),
+        },
+    }
 
 
 def _parse_plan(text: str) -> dict[str, Any]:

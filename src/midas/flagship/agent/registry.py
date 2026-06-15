@@ -33,8 +33,11 @@ from .tools.artifact import (
     plan_artifact_voice,
 )
 from .tools.code import plan_code_run
+from .tools.data_io import csv_read, json_read, plan_csv_write, plan_json_write
 from .tools.fs import fs_list, fs_read, plan_fs_write
 from .tools.fsguard import FsGuard
+from .tools.http import as_tool_payload as _http_payload
+from .tools.http import http_fetch
 from .tools.pdf import pdf_extract
 from .tools.sheet import plan_sheet_write, sheet_read
 
@@ -197,6 +200,67 @@ def build_default_toolset(
                 output_taint=Taint.UNTRUSTED,
             )
         )
+
+    # Structured data — read tools AUTO, write tools gated via fs.write chain.
+    ts.register(
+        Tool(
+            name="json.read",
+            action="read_local_files",
+            fn=lambda path: _as_dict(json_read(guard, path)),
+            output_taint=Taint.UNTRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="json.write",
+            action="repo_write",
+            fn=lambda path, data, indent=2: _as_dict(
+                plan_json_write(guard, path, data, indent=indent)
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="csv.read",
+            action="read_local_files",
+            fn=lambda path, max_rows=5000: _as_dict(csv_read(guard, path, max_rows=max_rows)),
+            output_taint=Taint.UNTRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="csv.write",
+            action="repo_write",
+            fn=lambda path, rows: _as_dict(plan_csv_write(guard, path, rows)),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    # http.fetch — read-only egress, output is UNTRUSTED data (trifecta guard applies).
+    if fetcher is not None:
+        ts.register(
+            Tool(
+                name="http.fetch",
+                action="read_local_files",
+                fn=lambda url: _http_payload(http_fetch(url, fetcher=fetcher)),
+                output_taint=Taint.UNTRUSTED,
+                has_egress=True,
+            )
+        )
+    # docx.draft — APPROVE-tier artifact (behind [docs] extra at runtime).
+    def _docx_plan(path: str, title: str, body: str) -> dict[str, Any]:
+        from .tools.docx import plan_docx
+
+        return _as_dict(plan_docx(guard, path, title=title, body=body))
+
+    ts.register(
+        Tool(
+            name="docx.draft",
+            action="repo_write",
+            fn=_docx_plan,
+            output_taint=Taint.TRUSTED,
+        )
+    )
 
     ts.register(
         Tool(

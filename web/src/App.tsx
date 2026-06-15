@@ -3,6 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { ChatPage } from "@/pages/Chat";
 import { MissionsPage } from "@/pages/Missions";
+import { ArtifactsPage } from "@/pages/Artifacts";
 import { AssetsPage } from "@/pages/Assets";
 import { ApprovalsPage } from "@/pages/Approvals";
 import { ProofsPage } from "@/pages/Proofs";
@@ -26,6 +27,7 @@ const router = createBrowserRouter([
       { index: true, element: <ChatPage /> },
       { path: "missions", element: <MissionsPage /> },
       { path: "assets", element: <AssetsPage /> },
+      { path: "artifacts", element: <ArtifactsPage /> },
       { path: "approvals", element: <ApprovalsPage /> },
       { path: "proofs", element: <ProofsPage /> },
       { path: "memory", element: <MemoryPage /> },
