@@ -53,6 +53,7 @@ actions:
     - irreversible_decision
     - execute_code                 # Stream E: code.run sandbox always approval-tier
     - write_spreadsheet            # Stream E: PDF→Excel + cell writes
+    - call_external_mcp            # WS-MCP: third-party MCP tool calls always gated
 
   never:                       # hard-forbidden regardless of approval
     - spam

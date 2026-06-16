@@ -126,6 +126,37 @@ class MemoryStore:
             MemoryKind.ERROR, key, content, sources=sources or [], tags=["lesson"]
         )
 
+    def record_cash(
+        self,
+        key: str,
+        *,
+        channel: str,
+        offer: str,
+        revenue_usd: float,
+        cost_usd: float,
+        sources: list[str] | None = None,
+    ) -> MemoryEntry:
+        """Record an attributed cash event (channel × offer → revenue/cost).
+
+        Proof-First: proof_level rises to MEDIUM only when sources are provided
+        (analytics URL, receipt id, invoice link). Net is recorded explicitly so
+        future scans can bias toward channels that historically paid.
+        """
+        net = revenue_usd - cost_usd
+        content = (
+            f"Channel {channel} × offer {offer}: revenue=${revenue_usd:.2f} "
+            f"cost=${cost_usd:.2f} net=${net:.2f}"
+        )
+        proof = ProofLevel.MEDIUM if sources else ProofLevel.LOW
+        return self.remember(
+            MemoryKind.CASH,
+            key,
+            content,
+            proof_level=proof,
+            sources=sources or [],
+            tags=["cash"],
+        )
+
     # ── read ───────────────────────────────────────────────────────────────────
     def recall(
         self,
@@ -168,10 +199,25 @@ class MemoryStore:
             ).fetchall()
         return [self._row(r) for r in rows]
 
-    def context_pack(self, *, per_kind: int = 3, query: str | None = None) -> str:
-        """Assemble the hot tier: a small bundle of the most relevant live memories."""
+    def context_pack(
+        self,
+        *,
+        per_kind: int = 3,
+        query: str | None = None,
+        bias_kind: MemoryKind | None = None,
+    ) -> str:
+        """Assemble the hot tier: a small bundle of the most relevant live memories.
+
+        ``bias_kind`` (optional, default None — behaviour unchanged) places that
+        namespace's section at the top of the pack so the planner sees it first.
+        Used by the cash loop to surface CASH memories ahead of the rest.
+        """
         lines: list[str] = []
-        for k in MemoryKind:
+        order: list[MemoryKind] = list(MemoryKind)
+        if bias_kind is not None and bias_kind in order:
+            order.remove(bias_kind)
+            order.insert(0, bias_kind)
+        for k in order:
             entries = self.recall(kind=k, query=query, limit=per_kind)
             if not entries:
                 continue

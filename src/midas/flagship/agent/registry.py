@@ -32,6 +32,14 @@ from .tools.artifact import (
     plan_artifact_text,
     plan_artifact_voice,
 )
+from .tools.cash import (
+    plan_adcopy,
+    plan_landing,
+    plan_outreach_sequence,
+    plan_product,
+    plan_proposal,
+    plan_quote,
+)
 from .tools.code import plan_code_run
 from .tools.data_io import csv_read, json_read, plan_csv_write, plan_json_write
 from .tools.fs import fs_list, fs_read, plan_fs_write
@@ -271,6 +279,92 @@ def build_default_toolset(
                 plan_code_run(code, language=language, timeout=timeout)
             ),
             output_taint=Taint.UNTRUSTED,
+        )
+    )
+
+    # ── cash-shaped artifacts (WS2) — all APPROVE-tier, no egress, no scripts.
+    ts.register(
+        Tool(
+            name="landing.draft",
+            action="repo_write",
+            fn=lambda path, headline, cta_text, subheading="", body="", cta_href="#": _as_dict(
+                plan_landing(
+                    guard, path,
+                    headline=headline, subheading=subheading, body=body,
+                    cta_text=cta_text, cta_href=cta_href,
+                )
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="product.draft",
+            action="repo_write",
+            fn=lambda path, title, deliverables, audience="", problem="", price_usd=0.0: _as_dict(
+                plan_product(
+                    guard, path,
+                    title=title, audience=audience, problem=problem,
+                    deliverables=deliverables, price_usd=price_usd,
+                )
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="outreach.sequence",
+            action="repo_write",
+            fn=lambda path, audience, offer, steps: _as_dict(
+                plan_outreach_sequence(
+                    guard, path, audience=audience, offer=offer, steps=steps
+                )
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    def _proposal_plan(
+        path: str, client: str, project: str, scope: list[str], price_usd: float,
+        timeline: str = "", currency: str = "USD",
+    ) -> dict[str, Any]:
+        return _as_dict(
+            plan_proposal(
+                guard, path,
+                client=client, project=project, scope=scope,
+                price_usd=price_usd, timeline=timeline, currency=currency,
+            )
+        )
+
+    ts.register(
+        Tool(
+            name="proposal.draft",
+            action="repo_write",
+            fn=_proposal_plan,
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="quote.draft",
+            action="repo_write",
+            fn=lambda path, client, items, currency="USD", quote_number="", notes="": _as_dict(
+                plan_quote(
+                    guard, path,
+                    client=client, items=items, currency=currency,
+                    quote_number=quote_number, notes=notes,
+                )
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="adcopy.draft",
+            action="repo_write",
+            fn=lambda path, product, audience, variants: _as_dict(
+                plan_adcopy(guard, path, product=product, audience=audience, variants=variants)
+            ),
+            output_taint=Taint.TRUSTED,
         )
     )
     return ts

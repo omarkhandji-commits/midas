@@ -1,17 +1,28 @@
 ---
 name: Feature request
-about: Suggest a MIDAS improvement
-title: "[Feature]: "
-labels: enhancement
+about: Propose a new capability or improvement.
+title: "feat: "
+labels: ["enhancement"]
 ---
 
-## Problem
+### Problem
 
-What business/operator problem should this solve?
+What are you trying to do that the current code does not allow?
 
-## Proposed behavior
+### Proposed change
 
-## Proof and safety
+Sketch of the behaviour you would like. Include CLI shape, config keys, or
+public API if relevant.
 
-- What sources, receipts, approvals, or tests should exist?
-- Could this create spam, privacy, money, legal, or supply-chain risk?
+### Alternatives considered
+
+Workarounds you tried, and why they fall short.
+
+### Safety considerations
+
+Would the change introduce new mutating actions, external sends, or unsourced
+claims? If so, describe the proposed approval-gating and tests.
+
+### Additional context
+
+Links to prior discussion, related issues, references.

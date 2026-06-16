@@ -44,6 +44,10 @@ keys_app = typer.Typer(
 proof_app = typer.Typer(
     help="Export portable proof links (offline-verifiable HTML).", no_args_is_help=True
 )
+mcp_app = typer.Typer(
+    help="MCP integration — serve MIDAS as an MCP server, or connect to external ones.",
+    no_args_is_help=True,
+)
 
 app.add_typer(approvals_app, name="approvals")
 app.add_typer(memory_app, name="memory")
@@ -57,6 +61,7 @@ app.add_typer(media_app, name="media")
 app.add_typer(voice_app, name="voice")
 app.add_typer(keys_app, name="keys")
 app.add_typer(proof_app, name="proof")
+app.add_typer(mcp_app, name="mcp")
 
 
 @keys_app.command("export-public")
@@ -88,11 +93,105 @@ def version() -> None:
 
 
 @app.command()
+def init(
+    key: str = typer.Option(
+        "", "--key", help="LLM API key. Provider is detected from the prefix."
+    ),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+    no_test: bool = typer.Option(
+        False, "--no-test", help="Skip the one-token smoke test."
+    ),
+) -> None:
+    """One command to a working setup: detect a local model or take an API key.
+
+    Order of resolution:
+    1. ``--key <APIKEY>`` — provider detected from prefix (OpenAI, Anthropic,
+       OpenRouter, Groq, Google). Key written to ``.env``.
+    2. A running local Ollama — an installed model is selected automatically.
+    3. Neither — prints the two fastest paths to a working model.
+
+    Then it initializes local state and runs a one-token smoke test so a green
+    line means you can run `midas earn` immediately.
+    """
+    from midas.flagship.onboard import configure
+    from midas.flagship.runtime import build_runtime
+
+    base = Path(base_dir)
+    result = configure(base, key=key or None)
+
+    if result.mode == "none":
+        typer.echo("No LLM configured yet. Two fast paths:\n")
+        typer.echo("  Local, free, private (recommended):")
+        typer.echo("    1. Install Ollama: https://ollama.com")
+        typer.echo("    2. ollama pull llama3.1:8b")
+        typer.echo("    3. midas init        # auto-detects it\n")
+        typer.echo("  Cloud (one key):")
+        typer.echo("    midas init --key sk-...           # OpenAI")
+        typer.echo("    midas init --key sk-ant-...       # Anthropic")
+        typer.echo("    midas init --key sk-or-...        # OpenRouter")
+        if result.detail:
+            typer.echo(f"\nNote: {result.detail}")
+        raise typer.Exit(code=1)
+
+    if result.mode == "local":
+        typer.echo(f"Local model detected: {result.model} (no API key needed).")
+    else:
+        typer.echo(f"Configured {result.provider} → cheap role: {result.model}")
+
+    # Initialize state (signing key, ledger, memory, approvals).
+    rt = build_runtime(base_dir)
+    rt.append_receipt(
+        run_id="init",
+        agent="cli",
+        tool="init",
+        inputs={"mode": result.mode, "provider": result.provider},
+        outputs={"model": result.model},
+    )
+    typer.echo(f"State ready: {rt.ledger.path.parent}")
+
+    if no_test:
+        typer.echo("Skipped smoke test. Run `midas earn \"<niche>\"` to start.")
+        return
+
+    typer.echo("Running a one-token smoke test...")
+    try:
+        res = rt.router.complete(
+            [{"role": "user", "content": "Reply with the single word: ready"}],
+            role="cheap",
+            agent="init-smoke",
+            est_usd=0.001,
+        )
+        ok = "ready" in (res.text or "").lower()
+        if ok:
+            typer.echo(f"LLM responds. ({res.model}, cost ${res.cost_usd:.4f})")
+            typer.echo('\nYou are set. Try:  midas earn "your niche"')
+        else:
+            typer.echo(f"LLM replied but unexpected text: {res.text[:80]!r}")
+            typer.echo("Setup is written; you can still run `midas earn`.")
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"Smoke test could not reach the model: {exc}")
+        typer.echo("Config is written. Check `midas providers doctor`.")
+
+
+@app.command()
 def setup(
     base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
 ) -> None:
-    """Initialize local state, signing key, memory, cache, approvals, and ledger."""
+    """Initialize local state, signing key, memory, cache, approvals, and ledger.
+
+    Also seeds ``config/providers.yml`` from the example if missing, so the LLM
+    cascade boots without a first-run "all models failed" surprise.
+    """
+    from shutil import copyfile
+
     from midas.flagship.runtime import build_runtime
+
+    cfg = Path(base_dir) / "config"
+    providers = cfg / "providers.yml"
+    example = cfg / "providers.example.yml"
+    if not providers.exists() and example.exists():
+        copyfile(example, providers)
+        typer.echo(f"Seeded {providers.name} from providers.example.yml")
 
     rt = build_runtime(base_dir)
     rt.append_receipt(
@@ -177,27 +276,37 @@ def eval(
     suite: str = typer.Option(
         "all",
         "--suite",
-        help="Eval subset: 'all' (default) or 'tau' for τ-bench-only rule adherence.",
+        help="Eval subset: 'all' (default), 'tau' for τ-bench rule adherence, "
+        "or 'live' for τ-bench against a real local model (Ollama).",
+    ),
+    model: str = typer.Option(
+        "", "--model", help="(--suite live only) override model, e.g. 'llama3.1:8b'."
     ),
     base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
 ) -> None:
-    """Run the deterministic Proof-First eval suite."""
+    """Run the deterministic Proof-First eval suite (or the live lane with --suite live)."""
     from midas.core.eval import render_report
     from midas.flagship.eval import build_suite
 
-    policy_path = Path(base_dir) / "config" / "policy.yml"
-    full = build_suite(policy_path)
-    if suite == "tau":
-        chosen = [e for e in full.evals if "τ-bench" in e.name or "tau" in e.name.lower()]
-        if not chosen:
-            raise typer.BadParameter("no τ-bench eval registered in the suite")
-        from midas.core.eval import Suite
+    if suite == "live":
+        from midas.flagship.eval.live_eval import build_live_suite
 
-        results = Suite(name=f"{full.name} — τ-bench only", evals=chosen).run()
-    elif suite == "all":
-        results = full.run()
+        live_suite = build_live_suite(model=model or None)
+        results = live_suite.run()
     else:
-        raise typer.BadParameter("--suite must be 'all' or 'tau'")
+        policy_path = Path(base_dir) / "config" / "policy.yml"
+        full = build_suite(policy_path)
+        if suite == "tau":
+            chosen = [e for e in full.evals if "τ-bench" in e.name or "tau" in e.name.lower()]
+            if not chosen:
+                raise typer.BadParameter("no τ-bench eval registered in the suite")
+            from midas.core.eval import Suite
+
+            results = Suite(name=f"{full.name} — τ-bench only", evals=chosen).run()
+        elif suite == "all":
+            results = full.run()
+        else:
+            raise typer.BadParameter("--suite must be 'all', 'tau', or 'live'")
     report = render_report(results)
     if out:
         Path(out).write_text(report, encoding="utf-8")
@@ -256,6 +365,288 @@ def scan(
         typer.echo(f"Approval queued: #{approval_id}")
 
 
+@app.command()
+def earn(
+    niche: str = typer.Argument(..., help="The niche to chase, e.g. 'tools for plumbers'."),
+    live: bool = typer.Option(False, "--live", help="Use real LLM/search plumbing."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Closed cash loop: scan → prepare landing → queue approval → (operator ships).
+
+    Compared to ``midas scan``, ``midas earn`` also asks the toolset for one
+    cash-shaped artifact (``landing.draft``) sized for the picked move. It goes
+    through Sentinel → ``ApprovalQueue`` like any other gated tool — nothing is
+    executed inline. After running, use ``midas approvals`` + ``midas execute``
+    to ship it.
+    """
+    from midas.flagship.flows.cash_loop import CashLoop
+    from midas.flagship.flows.demo import demo_candidates
+    from midas.flagship.flows.render import render_report
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    run_id = f"earn:{niche}"
+    toolset = rt.build_toolset(run_id=run_id)
+    loop = CashLoop(
+        toolset=toolset,
+        memory=rt.memory,
+        ledger=rt.ledger,
+        approvals=rt.approvals,
+    )
+    if live:
+        report = loop.run(
+            niche,
+            router=rt.router,
+            search=rt.search,
+            verifier=rt.verifier,
+            run_id=run_id,
+        )
+    else:
+        report = loop.run(niche, candidates=demo_candidates())
+
+    rt.append_receipt(
+        run_id=run_id,
+        agent="cli",
+        tool="earn",
+        inputs={"niche": niche, "live": live},
+        outputs={
+            "daily_move": bool(report.move),
+            "artifacts_queued": len(report.artifacts),
+            "feedback_applied": not report.feedback.is_zero,
+        },
+    )
+    typer.echo(render_report(report.scan))
+    if report.feedback.reasons:
+        typer.echo("\nFeedback bias from past cash:")
+        for r in report.feedback.reasons:
+            typer.echo(f"  - {r}")
+    if report.artifacts:
+        typer.echo("\nQueued artifacts (awaiting approval):")
+        for art in report.artifacts:
+            typer.echo(f"  - {art.tool} (approval #{art.approval_id})")
+    typer.echo(
+        "\nMIDAS prepared the move. Nothing shipped. Approve with `midas approvals approve <id>` "
+        "then `midas execute <id>`."
+    )
+
+
+@app.command()
+def advise(
+    vault: str = typer.Argument(
+        ..., help="Path to your Obsidian vault (or any folder of Markdown notes)."
+    ),
+    live: bool = typer.Option(
+        False, "--live", help="Use the LLM to propose 3 ranked cash moves."
+    ),
+    start: bool = typer.Option(
+        False, "--start",
+        help="After ranking, immediately queue an `earn` cycle on the top move.",
+    ),
+    limit: int = typer.Option(50, "--limit", help="Max notes to scan."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Partner mode — reads your vault, ranks 3 cash moves, optionally launches one.
+
+    Reads notes locally (no upload). Symlinks that escape the vault are refused.
+    With ``--live``: asks the LLM for **3 ranked moves**, each citing the source
+    note(s) and stating the shortest path to $1. With ``--start``: queues a full
+    cash cycle on move #1 (`midas earn`-equivalent, gated as always).
+    """
+    from midas.flagship.flows.cash_loop import CashLoop
+    from midas.flagship.flows.demo import demo_candidates
+    from midas.flagship.obsidian import projects, scan_vault, summarize_vault
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    notes = scan_vault(vault, limit=limit)
+    summary = summarize_vault(notes)
+    typer.echo(summary)
+    typer.echo("")
+
+    proj = projects(notes)
+    if not proj:
+        typer.echo(
+            "No project notes detected. Tag one note with #project (or place it "
+            "in a `projects/` folder) and run again."
+        )
+        return
+
+    if not live:
+        typer.echo(
+            f"\nFound {len(proj)} project(s). Run with --live to get 3 ranked cash moves."
+        )
+        return
+
+    # Live advisor — single LLM call, asks for 3 RANKED moves with citations.
+    project_block = "\n".join(
+        f"### {n.title}\nFile: {n.path.name}\n\n{n.excerpt[:800]}" for n in proj[:5]
+    )
+    prompt = (
+        "You are the operator's business co-pilot. Based ONLY on the project "
+        "notes below, propose THREE next cash moves, ranked from shortest to "
+        "longest path to $1 of revenue. For each move use this format:\n"
+        "\n"
+        "## Move N (rank N): <one-line move title>\n"
+        "- Project: <which project, file name>\n"
+        "- Audience: <who exactly>\n"
+        "- Channel: <where to reach them>\n"
+        "- Deliverable: <what artifact MIDAS should prepare>\n"
+        "- Estimated time: <hours of operator work>\n"
+        "- Why this rank: <one sentence>\n"
+        "\n"
+        "No revenue promises. Cite file names you used. Under 400 words total.\n\n"
+        + project_block
+    )
+    res = rt.router.complete(
+        [{"role": "system", "content": "Honest, terse business co-pilot."},
+         {"role": "user", "content": prompt}],
+        role="cheap", agent="advise",
+    )
+    run_id = f"advise:{Path(vault).name}"
+    rt.append_receipt(
+        run_id=run_id,
+        agent="cli",
+        tool="advise",
+        inputs={"vault": str(vault), "n_projects": len(proj), "n_notes": len(notes)},
+        outputs={"model": res.model, "cost_usd": res.cost_usd},
+    )
+    typer.echo("\n── 3 ranked cash moves ─────────────────────────────────────")
+    typer.echo(res.text)
+    typer.echo(f"\n(receipted; cost: ${res.cost_usd:.4f})")
+
+    if not start:
+        typer.echo(
+            "\nTip: `midas advise <vault> --live --start` queues an `earn` cycle "
+            "on Move #1 right after ranking."
+        )
+        return
+
+    # --start: queue an earn cycle for the top project (heuristic: use the
+    # title of the most-recently-modified project note as the niche string).
+    top = proj[0]
+    typer.echo(f"\n── Starting earn cycle on: {top.title}  [src: {top.path.name}] ──")
+    earn_run_id = f"earn:advise:{top.path.stem}"
+    toolset = rt.build_toolset(run_id=earn_run_id)
+    loop = CashLoop(
+        toolset=toolset, memory=rt.memory, ledger=rt.ledger, approvals=rt.approvals,
+    )
+    report = loop.run(top.title, candidates=demo_candidates())
+    if report.move:
+        typer.echo(f"  - move picked: {report.move.candidate.name}")
+    typer.echo(f"  - artifacts queued: {len(report.artifacts)}")
+    for art in report.artifacts:
+        typer.echo(f"      * {art.tool} → approval #{art.approval_id}")
+    typer.echo("\nReview with `midas approvals list`. Nothing was shipped.")
+
+
+@app.command()
+def heartbeat(
+    niches: str = typer.Argument(
+        ..., help="Comma-separated list of niches, e.g. 'plumbers,electricians'."
+    ),
+    live: bool = typer.Option(False, "--live", help="Use real LLM/search plumbing."),
+    max_niches: int = typer.Option(10, "--max-niches"),
+    max_artifacts: int = typer.Option(20, "--max-artifacts"),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Autonomous PREPARATION pass across multiple niches.
+
+    Stacks signed approvals for the operator to ship. Never executes, never
+    auto-approves. Bounded by ``--max-niches`` and ``--max-artifacts``.
+
+    For recurring runs, install via ``midas schedule recipe``.
+    """
+    from midas.flagship.flows.cash_loop import CashLoop
+    from midas.flagship.flows.demo import demo_candidates
+    from midas.flagship.flows.heartbeat import CashHeartbeat
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    parsed = [n.strip() for n in niches.split(",") if n.strip()]
+    if not parsed:
+        raise typer.BadParameter("at least one niche is required")
+    run_id = f"heartbeat:{','.join(parsed)[:60]}"
+    loop = CashLoop(
+        toolset=rt.build_toolset(run_id=run_id),
+        memory=rt.memory,
+        ledger=rt.ledger,
+        approvals=rt.approvals,
+    )
+    hb = CashHeartbeat(
+        loop=loop,
+        router=rt.router if live else None,
+        search=rt.search if live else None,
+        verifier=rt.verifier if live else None,
+        max_niches=max_niches,
+        max_artifacts=max_artifacts,
+    )
+    # Offline path uses demo candidates for every niche (honest fallback).
+    cands_map = (
+        None if live else {n: demo_candidates() for n in parsed}
+    )
+    report = hb.run_once(parsed, live=live, candidates_by_niche=cands_map)
+
+    rt.append_receipt(
+        run_id=run_id,
+        agent="cli",
+        tool="heartbeat",
+        inputs={"niches": parsed, "live": live},
+        outputs={
+            "runs": len(report.runs),
+            "approvals_queued": report.approvals_queued,
+            "stopped_reason": report.stopped_reason,
+            "elapsed_seconds": report.elapsed_seconds,
+        },
+    )
+    typer.echo(
+        f"Heartbeat done: {len(report.runs)} run(s), {report.approvals_queued} "
+        f"approval(s) queued in {report.elapsed_seconds:.1f}s ({report.stopped_reason})."
+    )
+    for niche, n in report.queued_per_niche.items():
+        typer.echo(f"  - {niche}: {n} artifact(s) prepared")
+    typer.echo(
+        "\nNothing was shipped. Review with `midas approvals list`."
+    )
+
+
+@app.command()
+def pipeline(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Show every cash move's stage (awaiting_approval / shipped / outcome_recorded).
+
+    All rows are derived from the receipts ledger, the approval queue and
+    ``MemoryKind.RESULT``. No hidden state.
+    """
+    from midas.flagship.flows.cash_loop import CashLoop
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    loop = CashLoop(
+        toolset=rt.build_toolset(),
+        memory=rt.memory,
+        ledger=rt.ledger,
+        approvals=rt.approvals,
+    )
+    rows = loop.pipeline()
+    if not rows:
+        typer.echo("Pipeline is empty. Run `midas earn <niche>` first.")
+        return
+    typer.echo(
+        f"{'run_id':<40} {'stage':<20} {'pending':>8} {'cost':>10} {'rev':>10} {'net':>10}"
+    )
+    typer.echo("-" * 100)
+    for r in rows:
+        # Truncate by GRAPHEME-ish width (ASCII-safe ellipsis) — never inside a UTF-8 char.
+        rid = r["run_id"]
+        if len(rid) > 40:
+            rid = rid[:37].rstrip() + "..."
+        typer.echo(
+            f"{rid:<40} {r['stage']:<20} {r['approvals_pending']:>8}"
+            f" {r['cost_usd']:>10.4f} {r['revenue_usd']:>10.2f} {r['net_usd']:>10.2f}"
+        )
+
+
 @approvals_app.command("list")
 def approvals_list(
     base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
@@ -312,8 +703,16 @@ def memory_add(
     from midas.flagship.runtime import build_runtime
 
     rt = build_runtime(base_dir)
+    # Accept any case ("USER", "user", "User") + suggest valid kinds on typo.
+    try:
+        mem_kind = MemoryKind(kind.lower().strip())
+    except ValueError as exc:
+        valid = ", ".join(k.value for k in MemoryKind)
+        raise typer.BadParameter(
+            f"unknown memory kind {kind!r}. Try: {valid}"
+        ) from exc
     entry = rt.memory.remember(
-        MemoryKind(kind),
+        mem_kind,
         key,
         content,
         proof_level=ProofLevel.MEDIUM if source else ProofLevel.LOW,
@@ -823,14 +1222,38 @@ def demo(
 
 @app.command()
 def replay(
-    run_id: str = typer.Argument(..., help="run_id from a past receipt."),
+    run_id: str = typer.Argument(
+        "",
+        help="run_id from a past receipt. Pass nothing to list all known run_ids.",
+    ),
     base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
 ) -> None:
-    """Reconstruct a past run's transcript shape from its signed receipts."""
+    """Reconstruct a past run's transcript shape from its signed receipts.
+
+    Without arguments, lists every run_id present in the receipt ledger so you
+    can pick one (no more 'No receipts for ...' frustration).
+    """
     from midas.flagship.replay import format_replay, replay_run
     from midas.flagship.runtime import build_runtime
 
     rt = build_runtime(base_dir)
+    if not run_id.strip():
+        seen: dict[str, int] = {}
+        try:
+            for r in rt.ledger:
+                rid = r.body.run_id
+                seen[rid] = seen.get(rid, 0) + 1
+        except TypeError:
+            pass
+        if not seen:
+            typer.echo("No runs in the ledger yet. Try `midas earn <niche>` first.")
+            return
+        typer.echo(f"{'run_id':<60} {'receipts':>10}")
+        typer.echo("-" * 72)
+        for rid, n in sorted(seen.items()):
+            typer.echo(f"{rid[:60]:<60} {n:>10}")
+        typer.echo("\nReplay one with: midas replay '<run_id>'")
+        return
     transcript = replay_run(rt.ledger, run_id)
     typer.echo(format_replay(transcript))
 
@@ -1461,6 +1884,152 @@ def _print_schedule_recipe(recipe: Any) -> None:
     typer.echo(recipe.cron_line)
     typer.echo("\nGitHub Actions snippet:")
     typer.echo(recipe.github_actions)
+
+
+# ── MCP commands ────────────────────────────────────────────────────────────
+
+
+@mcp_app.command("serve")
+def mcp_serve(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+    name: str = typer.Option("midas", "--name", help="MCP server name."),
+) -> None:
+    """Run MIDAS as an MCP server over stdio (for Claude Desktop / Cursor)."""
+    from midas.flagship.mcp.server import run_stdio
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    run_stdio(rt, name=name)
+
+
+@mcp_app.command("add")
+def mcp_add(
+    name: str = typer.Argument(..., help="Logical name, e.g. 'filesystem'."),
+    command: str = typer.Argument(..., help="Executable, e.g. 'npx' or 'uvx'."),
+    arg: Annotated[
+        list[str] | None,
+        typer.Option("--arg", "-a", help="Argument (repeat for each)."),
+    ] = None,
+    env: Annotated[
+        list[str] | None,
+        typer.Option("--env", "-e", help="KEY=value env var (repeat for each)."),
+    ] = None,
+    note: str = typer.Option("", "--note", help="Free-form note for the operator."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Add or update an external MCP server in the registry."""
+    from midas.flagship.mcp.config import McpServerConfig, upsert_server
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    env_dict: dict[str, str] = {}
+    for raw in env or []:
+        if "=" not in raw:
+            raise typer.BadParameter(f"invalid --env: {raw!r} (use KEY=value)")
+        k, v = raw.split("=", 1)
+        env_dict[k.strip()] = v
+    cfg = McpServerConfig(
+        name=name, command=command, args=list(arg or []), env=env_dict, note=note,
+    )
+    upsert_server(rt.state_dir, cfg)
+    typer.echo(f"Added MCP server: {name} ({command} {' '.join(arg or [])})")
+    typer.echo(f"  → registered in {rt.state_dir / 'mcp_servers.yml'}")
+
+
+@mcp_app.command("list")
+def mcp_list(
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """List registered external MCP servers."""
+    from midas.flagship.mcp.config import load_servers_file
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    file = load_servers_file(rt.state_dir)
+    if not file.servers:
+        typer.echo("No MCP servers registered. Add one with `midas mcp add <name> <command>`.")
+        return
+    for s in file.servers:
+        status = "enabled" if s.enabled else "DISABLED"
+        typer.echo(f"  - {s.name}  ({status})  {s.command} {' '.join(s.args)}")
+        if s.note:
+            typer.echo(f"      note: {s.note}")
+
+
+@mcp_app.command("remove")
+def mcp_remove(
+    name: str = typer.Argument(..., help="Server name to remove."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Remove an external MCP server."""
+    from midas.flagship.mcp.config import remove_server
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    remove_server(rt.state_dir, name)
+    typer.echo(f"Removed MCP server: {name}")
+
+
+@mcp_app.command("test")
+def mcp_test(
+    name: str = typer.Argument(..., help="Server name to probe."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Probe an external MCP server: connect, list its tools, disconnect.
+
+    No tool is called and no approval is queued. Use this to verify the server
+    actually starts and to discover what tools it exposes.
+    """
+    from midas.flagship.mcp.client import list_tools
+    from midas.flagship.mcp.config import load_servers_file
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    file = load_servers_file(rt.state_dir)
+    cfg = next((s for s in file.servers if s.name == name), None)
+    if cfg is None:
+        raise typer.BadParameter(f"unknown MCP server: {name!r}")
+    try:
+        tools = list_tools(cfg)
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"Connection FAILED: {exc}")
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"OK — {cfg.name} exposes {len(tools)} tool(s):")
+    for t in tools:
+        typer.echo(f"  - {t.name}: {t.description[:80]}")
+
+
+@mcp_app.command("import")
+def mcp_import(
+    name: str = typer.Argument(..., help="Server name to import tools from."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+) -> None:
+    """Connect to an MCP server, list its tools, and queue a single APPROVE-tier
+    call so the operator can see what will get gated.
+
+    The actual tools are registered at runtime by ``midas earn`` / ``midas do``
+    when an MCP server is configured. This command is a diagnostic.
+    """
+    from midas.flagship.mcp.client import list_tools, register_external_mcp_tools
+    from midas.flagship.mcp.config import load_servers_file
+    from midas.flagship.runtime import build_runtime
+
+    rt = build_runtime(base_dir)
+    file = load_servers_file(rt.state_dir)
+    cfg = next((s for s in file.servers if s.name == name), None)
+    if cfg is None:
+        raise typer.BadParameter(f"unknown MCP server: {name!r}")
+    summaries = list_tools(cfg)
+    toolset = rt.build_toolset(run_id=f"mcp:import:{name}")
+    registered = register_external_mcp_tools(toolset, cfg, summaries=summaries)
+    typer.echo(f"Imported {len(registered)} tool(s) from {cfg.name}:")
+    for n in registered:
+        typer.echo(f"  - {n}  (action=call_external_mcp, taint=UNTRUSTED, approval-gated)")
+    typer.echo(
+        "\nThese tools are now visible inside this process. Persistent registration "
+        "happens automatically in `midas earn` / `midas do` when an MCP server is in "
+        f"{rt.state_dir / 'mcp_servers.yml'}."
+    )
 
 
 if __name__ == "__main__":

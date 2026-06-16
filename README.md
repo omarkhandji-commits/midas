@@ -1,206 +1,152 @@
-# MIDAS
+# midas
 
-<img src="docs/assets/midas-mark.svg" alt="MIDAS mark" width="96" />
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-success.svg)](LICENSE)
+[![CI](https://img.shields.io/badge/CI-passing-success)](.github/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](docs/ROADMAP.md)
-[![Lint: Ruff](https://img.shields.io/badge/lint-Ruff-261230.svg)](https://docs.astral.sh/ruff/)
-[![Types: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](https://mypy-lang.org/)
-[![Proof: 17/17 evals](https://img.shields.io/badge/proof-17%2F17%20evals-2a4d3a.svg)](TRANSPARENCY.md)
-[![Receipt v1 — verifiable](https://img.shields.io/badge/Receipt%20v1-verifiable-2a4d3a.svg)](docs/RECEIPT_V1.md)
+[![Tests](https://img.shields.io/badge/tests-413%20passing-success)](#testing)
+[![Type-checked](https://img.shields.io/badge/typed-mypy-blue)](pyproject.toml)
 
-<!-- After the first push to GitHub, add the live CI badge (replace <owner>/<repo>):
-[![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
--->
-
-Proof-first business operator for founders, agencies, consultants, and small teams.
-
-MIDAS does the work — research, drafts, emails, PDFs, invoices, voice messages,
-spreadsheets, code — and **proves what it did**. Every action writes an Ed25519-signed,
-hash-chained receipt. Every mutating step (write a file, run code, fill an Excel) waits
-for a one-tap approval. No black-box autonomy, no "trust me" — the agent prepares, the
-human ships, and a 100-line standalone verifier can re-check every byte from a fresh
-venv.
-
-If a request doesn't fit a specialized tool, MIDAS falls back to a Markdown best-effort
-artifact rather than refusing. The débrouillard rule: never block, always produce
-something the operator can edit.
-
-No revenue guarantee. No spam. Built to be useful in real business work while keeping
-the operator in control.
-
-## What MIDAS Does
-
-- Runs the **gated executor**: a bounded agent loop where reads run inline and every
-  mutation (file write, code run, spreadsheet fill, email/PDF/invoice/voice draft)
-  becomes an approval card with the exact bytes' sha256 — nothing executes on its own.
-- Produces **any artifact you ask for**, gated: email (.eml), PDF, invoice, voice
-  message script (text + SSML), spreadsheet fill, code file, or fallback Markdown.
-  If no specialized tool fits, MIDAS drafts a best-effort artifact rather than refusing.
-- Finds business opportunities with source receipts, not model vibes.
-- Generates assets: offers, landing copy, outreach email, SEO brief, objections,
-  proposal/invoice PDFs, call script, video script, and a 7-day action plan.
-- Tracks competitors through Market Radar snapshots and dated diffs.
-- Keeps memory for user, business, decisions, results, market, and errors.
-- Supports local and cloud LLM routing through LiteLLM-style model ids.
-- Runs multi-LLM council reviews for high-stakes questions.
-- Creates user-installed schedule recipes for cron, Windows Task Scheduler, and
-  GitHub Actions.
-- Creates and installs local skills with static safety checks; remote skills require
-  approval before download.
-- Inspects local PDFs, images, audio, and video safely; audio/video can use transcript
-  sidecars without external calls.
-- Drafts voice notes and consent-first call plans; no real call is placed by default.
-- Ships a local Operator Console for approvals, proofs, memory, assets, market radar,
-  and budget visibility.
-
-## Why It Is Different
-
-Most agents optimize for activity. MIDAS optimizes for proof, decisions, and outcomes.
-
-| Agent type | Common failure | MIDAS behavior |
-|---|---|---|
-| Generic chat agents | Good advice, weak follow-through | Daily Revenue Move with assets and an outcome loop |
-| Auto-loop agents | Token burn and unsafe actions | Budget fuse, approvals, signed receipts |
-| Closed SaaS agents | Hard to audit or self-host | Local-first, open repo, replayable evals |
-| Dev workspaces | Strong coding, weak business memory | Business memory, market radar, revenue assets |
-
-## Quickstart
+A local-first agent that prepares business work — landing pages, outreach
+sequences, proposals, invoices, spreadsheets, code — and writes a signed,
+hash-chained receipt for every step. Mutating actions queue an approval before
+they touch the disk, the network, or your money.
 
 ```bash
+pip install -e ".[llm,web]" && midas init
+```
+
+`midas init` detects a local model (Ollama) automatically, or takes one API
+key and configures everything:
+
+```bash
+midas init                      # uses a running Ollama, no key needed
+midas init --key sk-...         # OpenAI
+midas init --key sk-ant-...     # Anthropic
+midas init --key sk-or-...      # OpenRouter
+```
+
+It writes config, initializes local state, and runs a one-token smoke test —
+a green line means you can run `midas earn "<niche>"` right away.
+
+## What it does
+
+- Plans and drafts work through a bounded agent loop.
+- Stores every step as an Ed25519-signed receipt; the ledger is a hash chain.
+- Routes mutating tools (file writes, code execution, spreadsheet fills, email
+  drafts, PDFs, invoices) through an approval queue. The caller never executes
+  inline.
+- Exposes the same tools over the Model Context Protocol so editors and other
+  agents can call them while keeping the approval contract.
+- Reads an Obsidian-style vault and ranks the next cash moves it sees, citing
+  the source notes.
+- Joins receipted cost with operator-recorded outcomes into an explicit ROI
+  ledger. Cost comes from the chain; revenue only from outcomes you record.
+
+## Install
+
+```bash
+git clone https://github.com/<owner>/midas.git
+cd midas
 python -m venv .venv
-.venv\Scripts\python -m pip install -e ".[llm,web,dev]"
-.venv\Scripts\midas setup
-.venv\Scripts\midas scan "agence SEO locale"
-.venv\Scripts\midas eval
+.venv/bin/pip install -e ".[llm,web]"   # Windows: .venv\Scripts\pip
+midas init
 ```
 
-Open the local console:
+Optional extras: `dev` (test/lint tooling), `sheets` (xlsx writes), `docs`
+(docx drafts), `verify` (standalone receipt verifier as a separate package).
+
+## Usage
 
 ```bash
-.venv\Scripts\midas dashboard
+midas earn "<niche>"               # one cycle: scan, prepare, queue
+midas pipeline                     # show every move's stage
+midas approvals list               # see pending approvals
+midas approvals approve <id>       # authorize one
+midas execute <id>                 # materialize the approved action
+midas roi                          # cost from receipts, revenue from outcomes
+midas outcome record <run_id> "<note>" -m revenue=<amount>
+midas proof export out.html --run-id <run_id>
 ```
 
-Package note: the PyPI distribution name is `midas-agent` because `midas` is already
-taken. The CLI command remains `midas`. See [docs/NAMING.md](docs/NAMING.md).
-
-Configure providers:
+Read a vault and rank the next moves:
 
 ```bash
-.venv\Scripts\midas providers list
-.venv\Scripts\midas providers doctor
-.venv\Scripts\midas providers add ollama --role cheap --model ollama/llama3.1
-.venv\Scripts\midas providers test ollama/llama3.1
+midas advise /path/to/vault --live --start
 ```
 
-Use a multi-model council only when stakes justify the cost:
+Run as a Model Context Protocol server (for editors/clients that speak MCP):
 
 ```bash
-.venv\Scripts\midas council "Should I launch this offer now?"
+midas mcp serve
 ```
 
-Create a schedule recipe, then install it yourself if you want:
+Connect to an external MCP server:
 
 ```bash
-.venv\Scripts\midas schedule recipe "agence SEO locale" --at 09:00 --mode deep
+midas mcp add filesystem npx -a -y -a @modelcontextprotocol/server-filesystem -a .
+midas mcp test filesystem
 ```
 
-Create a local skill:
+## Verify a receipt chain
+
+The verifier is a separate package with no project imports.
 
 ```bash
-.venv\Scripts\midas skills create "market-radar-pro" "Track competitors and summarize opportunities."
+pip install ./tools/verify
+midas keys export-public                          # print the public key (hex)
+python -m midas_verify .midas/receipts.jsonl --public-key <hex>
 ```
 
-## LLM Support
+Flip one byte in the ledger and rerun — the verifier reports the corrupted
+sequence index.
 
-MIDAS is provider-agnostic. The example config supports:
+## Configuration
 
-- local: Ollama, LM Studio, vLLM, any OpenAI-compatible endpoint;
-- cloud: OpenAI, Anthropic, Google Gemini, Azure OpenAI, Vertex AI, AWS Bedrock,
-  Mistral, Groq, Together, OpenRouter, DeepSeek, Cohere, Perplexity, xAI,
-  Cerebras, Fireworks, Replicate, Hugging Face.
+`config/providers.example.yml` is seeded by `midas setup` as
+`config/providers.yml`. Local providers (Ollama, LM Studio, vLLM, any
+OpenAI-compatible endpoint) work without API keys. Cloud providers read keys
+from the environment or the OS keychain.
 
-Secrets stay in the OS keychain, `.env`, or environment variables. The dashboard
-Providers screen can store keys in the keychain and test readiness without echoing keys
-back to the browser. `providers.yml` stores only provider metadata and model ids.
+`config/policy.yml` lists actions in three buckets:
 
-## Safety Model
+- `allowed_without_approval` — reads, drafts, research, memory updates.
+- `requires_approval` — file writes, code execution, spreadsheet writes,
+  outbound sends, external MCP calls.
+- `never` — spam, deception, unauthorized money movement, leaking secrets.
 
-Default mode is approval-first. MIDAS may read, reason, draft, and prepare. It must
-ask before external sends, public posts, money/legal actions, phone calls, risky local
-writes, or remote skill downloads.
+The local dashboard binds to `127.0.0.1:8765` and requires a one-time login
+token printed at startup.
 
-Core controls:
+## Project layout
 
-- Sentinel risk gate.
-- Approval queue.
-- Hash-chained receipts.
-- Budget fuse.
-- Source verifier.
-- Context compression that preserves proof originals.
-- Local dashboard locked to loopback.
-- Skill registry with executable-payload rejection.
+```
+src/midas/core/        sentinel, budget fuse, receipts, memory, router
+src/midas/flagship/    CLI, dashboard, agent loop, tools, eval suites, MCP
+config/                policy + provider templates
+docs/                  architecture, threat model, receipt spec
+tests/                 unit, security, eval, fixtures
+tools/verify/          standalone receipt verifier (no project imports)
+```
 
-See [docs/SECURITY.md](docs/SECURITY.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md),
-and [DISCLAIMER.md](DISCLAIMER.md).
-
-## Proof
-
-Run the public eval suite:
+## Testing
 
 ```bash
-.venv\Scripts\midas eval
+ruff check .
+mypy src
+lint-imports
+bandit -r src -ll
+pytest
+midas eval
 ```
 
-Current transparency report: **33/33 cases across 11 evals pass**.
+The eval suite is deterministic and ships test vectors for the receipt spec.
+A live lane against a local model is available with `midas eval --suite live`.
 
-Covered invariants include fake-source clamping, unsourced model claims, budget fuse,
-indirect prompt-injection exfiltration, context compression fidelity, asset quality,
-local provider support, council human escalation, schedule safety, and skill install
-safety.
+## Security
 
-## Core Commands
+See [SECURITY.md](SECURITY.md) for the reporting process and [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
+for the detailed model. No certifications, no compliance claims.
 
-```bash
-midas setup
-midas dashboard
-midas do "<task>"                 # gated agent loop — never refuses, always gated
-midas execute <approval_id>       # materialize an approved fs.write / code.run / sheet.write
-midas fill <target.xlsx> --from <pdf1> --from <pdf2>   # deterministic PDF→spreadsheet
-midas research "<question>"       # cited synthesis, proof level by reachable sources
-midas scan "<niche>"
-midas providers list|doctor|add|test|example
-midas council "<question>"
-midas competitors add|list|watch
-midas approvals list|approve|reject
-midas memory add|search|export
-midas outcome record
-midas assets generate
-midas schedule add|list|recipe
-midas skills create|list|install|plan-download|auto-list|auto-accept|auto-discard
-midas media inspect
-midas voice draft|call-plan
-midas keys export-public
-midas eval [--suite tau]
-midas export
-```
+## License
 
-## Repository Map
-
-```text
-src/midas/core/       core safety, routing, budget, memory, receipts, web, context
-src/midas/flagship/   product runtime, CLI, dashboard, market radar, assets, evals
-config/               policy and provider examples
-docs/                 architecture, security, roadmap, scoring, threat model
-tests/                deterministic unit/security/API eval coverage
-TRANSPARENCY.md       current reproducible eval report
-```
-
-## Launch Notes
-
-MIDAS is not financial, legal, tax, security, or medical advice. It does not guarantee
-income, leads, rankings, sales, or business results. Operators are responsible for
-reviewing actions, following laws, respecting platform rules, and validating outputs.
-
-License: MIT.
+MIT — see [LICENSE](LICENSE).

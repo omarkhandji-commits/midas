@@ -62,6 +62,10 @@ class CodeRunResult:
     truncated: bool
     timed_out: bool
     duration_seconds: float
+    # WS6 — additive: label which isolation tier actually executed the code.
+    # Defaults to "process" (the historical behaviour). Existing callers and
+    # serialized outputs unaffected.
+    isolation: str = "process"
 
 
 def plan_code_run(code: str, *, language: str = "python", timeout: float = 10.0) -> CodePlan:
@@ -86,19 +90,61 @@ def execute_code_approved(
     plan: CodePlan,
     *,
     python_executable: str | None = None,
+    mode: str = "auto",
 ) -> CodeRunResult:
-    """Run an APPROVED code plan in the workspace sandbox. Caller guarantees approval."""
+    """Run an APPROVED code plan in the workspace sandbox. Caller guarantees approval.
+
+    WS6 — ``mode``:
+    - ``"process"`` (legacy default behaviour): subprocess with -I -S, scrubbed env,
+      socket monkey-patch, poisoned proxies. Available everywhere.
+    - ``"container"``: rootless ``podman``/``docker`` with ``--net=none`` and
+      dropped capabilities. Returns an error result with isolation="unavailable"
+      if no container runtime is found on PATH.
+    - ``"auto"`` (default for new calls): try container, fall back to process if
+      the runtime is missing. Either way the CodeRunResult.isolation field
+      records what actually ran.
+    """
     import time
 
     workspace = guard.workspace
     workspace.mkdir(parents=True, exist_ok=True)
+
+    # Container path (opt-in / auto-detected).
+    if mode in ("container", "auto"):
+        runtime = _detect_container_runtime()
+        if runtime is not None:
+            return _run_in_container(runtime, workspace, plan)
+        if mode == "container":
+            # Explicit request, no runtime: refuse rather than silently downgrade.
+            return CodeRunResult(
+                exit_code=127,
+                stdout="",
+                stderr="container mode requested but no podman/docker on PATH",
+                truncated=False,
+                timed_out=False,
+                duration_seconds=0.0,
+                isolation="unavailable",
+            )
+        # mode == "auto" and no container → fall through to process.
+
+    return _run_in_process(workspace, plan, python_executable, t0=time.monotonic())
+
+
+def _run_in_process(
+    workspace: Path,
+    plan: CodePlan,
+    python_executable: str | None,
+    *,
+    t0: float,
+) -> CodeRunResult:
+    """Process-level sandbox — historical behaviour, unchanged."""
+    import time
 
     wrapped = _NETWORK_BLOCK_PRELUDE + "\n" + plan.code
     env = _scrubbed_env()
     interpreter = python_executable or sys.executable
 
     args = [interpreter, "-I", "-S", "-c", wrapped]
-    start = time.monotonic()
     timed_out = False
     truncated = False
     try:
@@ -117,7 +163,7 @@ def execute_code_approved(
         timed_out = True
         stdout = exc.stdout or b""
         stderr = exc.stderr or b""
-        exit_code = 124  # POSIX convention for timeout
+        exit_code = 124
     except (OSError, subprocess.SubprocessError) as exc:
         return CodeRunResult(
             exit_code=126,
@@ -125,7 +171,8 @@ def execute_code_approved(
             stderr=f"sandbox failed to launch: {exc}",
             truncated=False,
             timed_out=False,
-            duration_seconds=time.monotonic() - start,
+            duration_seconds=time.monotonic() - t0,
+            isolation="process",
         )
 
     if len(stdout) > _MAX_OUTPUT_BYTES:
@@ -141,7 +188,85 @@ def execute_code_approved(
         stderr=stderr.decode("utf-8", errors="replace"),
         truncated=truncated,
         timed_out=timed_out,
-        duration_seconds=round(time.monotonic() - start, 4),
+        duration_seconds=round(time.monotonic() - t0, 4),
+        isolation="process",
+    )
+
+
+def _detect_container_runtime() -> str | None:
+    """Return ``"podman"`` or ``"docker"`` if available on PATH, else None."""
+    import shutil
+
+    for name in ("podman", "docker"):
+        if shutil.which(name) is not None:
+            return name
+    return None
+
+
+def _run_in_container(runtime: str, workspace: Path, plan: CodePlan) -> CodeRunResult:
+    """Run inside a rootless container with --net=none.
+
+    Best-effort: returns an error result if launching the container fails. We do
+    NOT auto-pull an image — the operator pre-pulls ``python:3.11-slim`` (or sets
+    ``MIDAS_SANDBOX_IMAGE``) before running. This keeps the surface auditable.
+    """
+    import os
+    import time
+
+    image = os.environ.get("MIDAS_SANDBOX_IMAGE", "python:3.11-slim")
+    wrapped = _NETWORK_BLOCK_PRELUDE + "\n" + plan.code
+    cmd = [
+        runtime, "run", "--rm",
+        "--net=none",
+        "--cap-drop=ALL",
+        "--read-only",
+        "--tmpfs", "/tmp:rw,size=64m",  # nosec B108 - path inside the container, not host
+        "-v", f"{str(workspace)}:/work:rw",
+        "-w", "/work",
+        image,
+        "python", "-I", "-S", "-c", wrapped,
+    ]
+    t0 = time.monotonic()
+    try:
+        proc = subprocess.run(  # nosec B603 - explicit argv; container runtime
+            cmd, capture_output=True, timeout=plan.timeout_seconds, check=False,
+        )
+        stdout = proc.stdout or b""
+        stderr = proc.stderr or b""
+        exit_code = int(proc.returncode)
+        timed_out = False
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or b""
+        stderr = exc.stderr or b""
+        exit_code = 124
+        timed_out = True
+    except (OSError, subprocess.SubprocessError) as exc:
+        return CodeRunResult(
+            exit_code=126,
+            stdout="",
+            stderr=f"container sandbox failed to launch: {exc}",
+            truncated=False,
+            timed_out=False,
+            duration_seconds=time.monotonic() - t0,
+            isolation="container-failed",
+        )
+
+    truncated = False
+    if len(stdout) > _MAX_OUTPUT_BYTES:
+        truncated = True
+        stdout = stdout[:_MAX_OUTPUT_BYTES]
+    if len(stderr) > _MAX_OUTPUT_BYTES:
+        truncated = True
+        stderr = stderr[:_MAX_OUTPUT_BYTES]
+
+    return CodeRunResult(
+        exit_code=exit_code,
+        stdout=stdout.decode("utf-8", errors="replace"),
+        stderr=stderr.decode("utf-8", errors="replace"),
+        truncated=truncated,
+        timed_out=timed_out,
+        duration_seconds=round(time.monotonic() - t0, 4),
+        isolation="container",
     )
 
 

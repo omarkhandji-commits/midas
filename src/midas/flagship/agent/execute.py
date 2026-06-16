@@ -211,6 +211,72 @@ def _execute_artifact(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     }
 
 
+_CASH_BUILDERS: dict[str, Any] = {}
+
+
+def _cash_handler(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    """Generic post-approval executor for cash-shaped artifacts (WS2).
+
+    Each tool name maps to a builder that re-derives the exact bytes from the
+    approval payload. The bytes are then written through the same
+    ``execute_fs_write`` chokepoint the rest of the artifact factory uses.
+    """
+    from .tools.fs import execute_fs_write
+
+    builder = _CASH_BUILDERS.get(request.tool)
+    if builder is None:
+        raise ValueError(f"no cash builder registered for {request.tool!r}")
+    payload = request.payload or {}
+    content = builder(payload)
+    path = str(payload.get("path") or "")
+    plan = execute_fs_write(runtime.fs_guard, path, content)
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool=f"{request.tool}.executed",
+        inputs={"approval_id": request.id, "path": plan.path},
+        outputs={
+            "path": plan.path,
+            "bytes": plan.bytes_len,
+            "sha256_new": plan.sha256_new,
+            "sha256_prev": plan.sha256_prev,
+        },
+        decision=Decision.ALLOW,
+    )
+    return {
+        "kind": request.tool.split(".")[0],
+        "path": plan.path,
+        "bytes_len": plan.bytes_len,
+        "sha256_new": plan.sha256_new,
+        "sha256_prev": plan.sha256_prev,
+    }
+
+
+def _register_cash_builders() -> None:
+    from .tools.cash import (
+        execute_adcopy,
+        execute_landing,
+        execute_outreach,
+        execute_product,
+        execute_proposal,
+        execute_quote,
+    )
+
+    _CASH_BUILDERS.update(
+        {
+            "landing.draft": execute_landing,
+            "product.draft": execute_product,
+            "outreach.sequence": execute_outreach,
+            "proposal.draft": execute_proposal,
+            "quote.draft": execute_quote,
+            "adcopy.draft": execute_adcopy,
+        }
+    )
+
+
+_register_cash_builders()
+
+
 _HANDLERS = {
     "fs.write": _execute_fs_write,
     "code.run": _execute_code_run,
@@ -224,4 +290,11 @@ _HANDLERS = {
     "json.write": _execute_json_write,
     "csv.write": _execute_csv_write,
     "docx.draft": _execute_docx,
+    # Cash-shaped artifacts (WS2) — all go through the same chokepoint.
+    "landing.draft": _cash_handler,
+    "product.draft": _cash_handler,
+    "outreach.sequence": _cash_handler,
+    "proposal.draft": _cash_handler,
+    "quote.draft": _cash_handler,
+    "adcopy.draft": _cash_handler,
 }

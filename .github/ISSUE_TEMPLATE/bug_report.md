@@ -1,27 +1,45 @@
 ---
 name: Bug report
-about: Report a reproducible MIDAS bug
-title: "[Bug]: "
-labels: bug
+about: Report a reproducible defect.
+title: "bug: "
+labels: ["bug"]
 ---
 
-## What happened?
+### Description
 
-## Reproduction
+A clear and concise description of the problem.
 
-```text
+### Reproduction
 
+```bash
+# Exact commands run, including arguments.
 ```
 
-## Expected behavior
+### Expected
 
-## Environment
+What you expected to happen.
 
-- OS:
-- Python:
-- MIDAS commit:
-- Local/cloud provider:
+### Actual
 
-## Safety impact
+What actually happened. Include the full error message or relevant log lines.
 
-Does this involve secrets, PII, money, external sends, filesystem writes, approvals, or receipts?
+### Environment
+
+| | |
+|---|---|
+| OS | (e.g. Windows 11, macOS 14.5, Ubuntu 24.04) |
+| Python | (`python --version`) |
+| Commit | (`git rev-parse --short HEAD`) |
+| Install command | (e.g. `pip install -e ".[llm,web,dev]"`) |
+
+### Security impact
+
+Tick any that apply.
+
+- [ ] Secrets, credentials, or PII could be exposed
+- [ ] Files outside the workspace could be written
+- [ ] Network calls bypass the approval queue
+- [ ] Receipt chain verification breaks
+
+If yes to any: please report privately per [SECURITY.md](../../SECURITY.md)
+instead of opening this issue.

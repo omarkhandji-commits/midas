@@ -1,54 +1,77 @@
 # Changelog
 
-## Unreleased
+All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
+the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### Added — gated executor
+## [Unreleased]
 
-- AgentLoop: bounded plan-execute loop driving every step through `Toolset.invoke()`,
-  Sentinel verdict, signed receipt. CLI: `midas do "<task>"`.
-- Artifact factory: `email.draft`, `pdf.draft`, `invoice.draft`, `voice.draft`,
-  `code.draft`, `sheet.read`/`sheet.write`, `artifact.text` fallback. Every mutating
-  artifact is APPROVE-tier; bytes live in the approval payload with sha256 of the
-  proposed contents. CLI: `midas execute <approval_id>`, `midas fill <xlsx> --from <pdf>`.
-- Filesystem chokepoint (`FsGuard`): workspace-only, `..` escape rejection, symlink
-  target check, policy-driven deny list. Adversarial tests under `tests/security/`.
-- Code sandbox (`code.run`): subprocess with isolated interpreter (`-I -S`), scrubbed
-  env, poisoned proxy vars, network monkey-patch, wall-clock timeout, output cap. The
-  callable never runs from `Toolset.invoke()` — only from `execute_code_approved()`
-  after a human resolves the approval.
-- `research.run` agent tool composing `SearchAdapter` + `Fetcher` + `SourceVerifier`
-  with the Proof-First contract (no HIGH without verified sources).
+### Added
 
-### Added — proof + débrouillardise
+- **One-command onboarding.** `midas init` detects a running local model
+  (Ollama) or takes a single API key (provider inferred from the prefix:
+  OpenAI, Anthropic, OpenRouter, Groq, Google), writes config and `.env`,
+  initializes state, and runs a one-token smoke test.
+- **Cash loop end-to-end.** `midas earn <niche>` chains discovery, scoring,
+  asset preparation, and approval queuing in one cycle. `midas pipeline`
+  surfaces every move's stage, derived from the receipt ledger, the approval
+  queue, and recorded outcomes — no hidden state.
+- **Six cash-shaped artifact tools.** `landing.draft`, `product.draft`,
+  `outreach.sequence`, `proposal.draft`, `quote.draft`, `adcopy.draft`. All
+  approval-gated; bytes live in the approval payload with sha256 of the
+  proposed content.
+- **Autonomous preparation pass.** `midas heartbeat "<n1,n2,…>"` prepares
+  drafts across multiple niches behind hard caps (max niches, max artifacts,
+  wall-clock budget). Never executes; only queues approvals.
+- **Cash namespace in memory.** `MemoryKind.CASH` and `record_cash()` capture
+  attributed revenue/cost per channel × offer. `context_pack(bias_kind=…)`
+  surfaces it ahead of other memory in the planner prompt. Proof-First applies
+  — sourced entries promote to MEDIUM; unsourced stay LOW.
+- **Feedback edge.** `flows/feedback.py` derives a bounded factor-score
+  adjustment (±2 per factor) from CASH/RESULT/ERROR memory and applies it
+  before the next scan scores opportunities.
+- **Vault advisor.** `midas advise <vault> --live` reads a Markdown vault
+  (Obsidian-compatible), ranks three next moves citing source notes, and
+  optionally launches a cash cycle on the top move (`--start`). Symlinks
+  escaping the vault are rejected.
+- **Model Context Protocol integration.** `midas mcp serve` exposes nine
+  tools (six cash artifacts + pipeline/approvals/ROI reads) over stdio. Every
+  mutating call returns an approval ticket instead of bytes. `midas mcp
+  add | list | remove | test | import` manage external MCP servers; imported
+  tools register under `mcp.<server>.<tool>` with `output_taint=UNTRUSTED`
+  and live behind the `call_external_mcp` action (approval-gated).
+- **Optional container sandbox for `code.run`.** When `podman` or `docker`
+  is on PATH, executions run in a rootless container with `--net=none` and
+  capabilities dropped. The result records the isolation tier ("process" or
+  "container") in the receipt. The historical `-I -S` process sandbox remains
+  the default fallback.
+- **Live eval lane.** `midas eval --suite live` runs τ-bench cases against a
+  real local model (Ollama by default). The offline deterministic suite
+  remains the gate; the live lane is opt-in.
 
-- Receipt v1 specification (`docs/RECEIPT_V1.md`) with deterministic test vectors and
-  a standalone verifier (`tools/verify/midas_verify`, PyNaCl + stdlib only, zero
-  `midas.*` imports). CLI: `midas keys export-public`.
-- Auto-skills (`flagship/autoskills.py`): proposals derived from completed 3-step
-  receipt sequences; local-only sequences may auto-accept, anything network-touching
-  goes through the approval queue. Multi-source tool discovery across PyPI, npm,
-  crates.io, GitHub, MCP registry — not GitHub-only. CLI: `midas skills auto-list`,
-  `auto-accept`, `auto-discard`.
-- Débrouillard web research module (`core/web/research.py`) and `midas research`
-  CLI. Proof contract: ≥3 verified sources → HIGH, 1–2 → MEDIUM, 0 → LOW.
-- τ-bench rule-adherence adapter wired into the eval suite. `midas eval --suite tau`
-  isolates the τ-bench cases.
+### Changed
 
-### Added — surfaces
+- `midas setup` seeds `config/providers.yml` from the example when missing.
+- `midas memory add <kind>` accepts any case (`USER`, `user`, `User`) and
+  suggests valid kinds on typo.
+- `midas replay` with no argument lists every `run_id` known to the ledger.
+- `pipeline` and `roi` truncate long `run_id` values on grapheme boundaries
+  rather than cutting through UTF-8 sequences.
 
-- Dashboard endpoints: `/api/research`, `/api/autoskills`, `/api/autoskills/{id}/accept`,
-  `/api/autoskills/{id}/discard`, `/api/import`, enriched `/api/runs` with status.
-- SPA pages for Memory, Market Radar, Outcomes, Schedule, Skills, Settings/Backup.
+### Security
 
-### Eval surface
+- New action `call_external_mcp` in `requires_approval`. Third-party MCP
+  responses are tagged `Taint.UNTRUSTED`, so the lethal-trifecta rule fires if
+  combined with private access plus egress.
+- Obsidian vault scanner refuses symlinks whose resolved target escapes the
+  vault.
+- 17 additional invariant tests cover path traversal, kill switch under
+  multiple paths, prompt-injection labelling, replay determinism, cash
+  attribution strictness, and MCP prefix safety.
 
-- 33/33 deterministic cases across 11 evals, including:
-  - Gated executor — no mutation without approval (E1)
-  - Débrouillard artifacts — never refuse, always gated (E2)
-  - τ-bench rule adherence with rule-adherence subscore (B)
-  - Débrouillard web research — no HIGH without verified sources (D2)
+### Quality
 
-### Tooling
-
-- `[verify]` and `[sheets]` optional extras in `pyproject.toml`.
-- PyPI distribution name `midas-agent` (`midas` is taken); CLI remains `midas`.
+- Test suite: 413 tests passing.
+- Type-checked: 130 source files clean under `mypy`.
+- Linted: `ruff` clean; `bandit -r src -ll` reports no medium/high findings.
+- Architectural contract: `core` does not import `flagship` (enforced by
+  `import-linter`).

@@ -1,6 +1,6 @@
-"""Memory models — six typed namespaces, each entry Proof-First.
+"""Memory models — typed namespaces, each entry Proof-First.
 
-The six kinds match how MIDAS actually reasons about a business:
+The kinds match how MIDAS actually reasons about a business:
 
   USER     — the operator: style, projects, limits, budget.
   BUSINESS — what is sold: offers, audience, prices.
@@ -8,6 +8,8 @@ The six kinds match how MIDAS actually reasons about a business:
   RESULT   — what happened: replies, sales, clicks, outcomes (closes Track).
   MARKET   — competitors: prices, offers, content, SEO, ads, changes.
   ERROR    — "last time this didn't work because…" (drives self-improvement).
+  CASH     — what actually paid: channel × offer → revenue/cost — the "what
+             worked for money" trail that biases the planner toward cash.
 
 Every entry carries sources + a proof level + a timestamp. Entries are never edited
 in place: an update writes a new row that *supersedes* the old one, so the history
@@ -30,6 +32,7 @@ class MemoryKind(StrEnum):
     RESULT = "result"
     MARKET = "market"
     ERROR = "error"
+    CASH = "cash"
 
 
 @dataclass

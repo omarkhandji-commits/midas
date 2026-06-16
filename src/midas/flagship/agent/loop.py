@@ -249,12 +249,18 @@ def llm_planner(
     role: str = "cheap",
     est_usd: float = 0.005,
     memory: Any = None,
+    bias_kind: Any = None,
 ) -> Planner:
     """Build a planner that calls the router and parses one JSON plan per step.
 
     If ``memory`` exposes ``context_pack(query=...)``, the operator's relevant
-    memories (USER/BUSINESS/DECISION/RESULT/MARKET/ERROR namespaces) are passed
-    into the system prompt so MIDAS visibly "knows you" across runs.
+    memories (USER/BUSINESS/DECISION/RESULT/MARKET/ERROR/CASH namespaces) are
+    passed into the system prompt so MIDAS visibly "knows you" across runs.
+
+    ``bias_kind`` is forwarded to ``context_pack`` when the store supports it
+    (additive, optional): pass ``MemoryKind.CASH`` from the cash loop so the
+    "what worked for money" trail is surfaced first. Defaults to None — behaviour
+    unchanged.
     """
 
     def _plan(task: str, transcript: AgentTranscript) -> dict[str, Any]:
@@ -269,7 +275,14 @@ def llm_planner(
                 # BUSINESS / DECISION context. Narrow keyword filtering belongs in a
                 # ranker, not here — a broad SQL LIKE on the task tends to return
                 # nothing and hide the "knows you" signal.
-                memory_context = memory.context_pack(query=None) or ""
+                # Try the biased call first; fall back to legacy signature so older
+                # MemoryStore stubs in tests keep working.
+                try:
+                    memory_context = (
+                        memory.context_pack(query=None, bias_kind=bias_kind) or ""
+                    )
+                except TypeError:
+                    memory_context = memory.context_pack(query=None) or ""
             except Exception:  # noqa: BLE001 - memory failures must not poison the planner
                 memory_context = ""
         system = _PLANNER_SYSTEM

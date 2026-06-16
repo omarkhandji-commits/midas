@@ -5,7 +5,8 @@
 *.key
 *.pem
 secrets/
-config/providers.yml          # real provider config (keep providers.example.yml only)
+# Real provider config (only providers.example.yml ships in the repo).
+config/providers.yml
 
 # Agent memory / runtime state (private business data)
 .midas/
@@ -41,3 +42,28 @@ coverage.xml
 .idea/
 .vscode/
 *.swp
+
+# Internal session artefacts — never push.
+HANDOFF.md
+PUSH_TO_GITHUB.md
+RELEASE_CHECKLIST.md
+AGENTS.md
+CLAUDE.md
+demo-output/
+real-cash-test/
+.shipvitals-config.json
+.shipvitals-evidence/
+.hypothesis/
+.import_linter_cache/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local tmp/scratch files produced by demos.
+landing-*.html
+from-mcp-client.html
+do-output.md
+earn-proof.html
+proof.html
+out.html
+test-proof.html

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from midas.core.config import Autonomy, load_app_config, load_policy, load_providers
 
 BASE = Path(__file__).resolve().parents[2]  # midas/
@@ -60,7 +62,9 @@ def test_env_file_exports_provider_keys_to_process(tmp_path: Path, monkeypatch) 
     assert __import__("os").environ["OPENROUTER_API_KEY"] == "from_file"
 
 
-def test_env_model_overrides_provider_roles(tmp_path: Path) -> None:
+def test_env_model_overrides_provider_roles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "policy.yml").write_text(
@@ -71,6 +75,10 @@ def test_env_model_overrides_provider_roles(tmp_path: Path) -> None:
         (BASE / "config" / "providers.example.yml").read_text(),
         encoding="utf-8",
     )
+    # Isolate from ambient env: a real `.env` elsewhere (e.g. from `midas init`)
+    # must not leak into this test via os.environ.
+    monkeypatch.delenv("MIDAS_MODEL_CHEAP", raising=False)
+    monkeypatch.delenv("MIDAS_MODEL_SMART", raising=False)
     (tmp_path / ".env").write_text(
         "MIDAS_MODEL_CHEAP=ollama/qwen2.5\nMIDAS_MODEL_SMART=openrouter/auto\n",
         encoding="utf-8",

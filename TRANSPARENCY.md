@@ -5,17 +5,17 @@ Overall: **PASS** — 41/41 cases across 14 evals.
 | Eval | Verdict | Pass rate | Threshold | Cases | Seconds |
 |---|---|---|---|---|---|
 | fake-source clamping | **pass** | 2/2 (100%) | 100% | 2 | 0.000 |
-| unsourced model claims | **pass** | 1/1 (100%) | 100% | 1 | 0.016 |
+| unsourced model claims | **pass** | 1/1 (100%) | 100% | 1 | 0.000 |
 | budget fuse | **pass** | 1/1 (100%) | 100% | 1 | 0.000 |
-| lethal trifecta | **pass** | 1/1 (100%) | 100% | 1 | 0.000 |
+| lethal trifecta | **pass** | 1/1 (100%) | 100% | 1 | 0.015 |
 | context compression fidelity | **pass** | 3/3 (100%) | 100% | 3 | 0.000 |
-| asset quality | **pass** | 3/3 (100%) | 100% | 3 | 0.015 |
+| asset quality | **pass** | 3/3 (100%) | 100% | 3 | 0.000 |
 | débrouillard web research | **pass** | 2/2 (100%) | 100% | 2 | 0.000 |
-| replay + signed-skill tamper detection | **pass** | 2/2 (100%) | 100% | 2 | 0.094 |
-| ROI + proof-link integrity | **pass** | 4/4 (100%) | 100% | 4 | 0.063 |
-| planner grounded in operator memory | **pass** | 2/2 (100%) | 100% | 2 | 0.078 |
-| gated executor — no mutation without approval | **pass** | 3/3 (100%) | 100% | 3 | 0.015 |
-| débrouillard artifacts — never refuse, always gated | **pass** | 2/2 (100%) | 100% | 2 | 0.016 |
+| replay + signed-skill tamper detection | **pass** | 2/2 (100%) | 100% | 2 | 0.110 |
+| ROI + proof-link integrity | **pass** | 4/4 (100%) | 100% | 4 | 0.031 |
+| planner grounded in operator memory | **pass** | 2/2 (100%) | 100% | 2 | 0.031 |
+| gated executor — no mutation without approval | **pass** | 3/3 (100%) | 100% | 3 | 0.016 |
+| débrouillard artifacts — never refuse, always gated | **pass** | 2/2 (100%) | 100% | 2 | 0.000 |
 | τ-bench rule adherence | **pass** | 9/9 (100%) | 100% | 9 | 0.000 |
 | operator autonomy guardrails | **pass** | 6/6 (100%) | 100% | 6 | 0.016 |
 
