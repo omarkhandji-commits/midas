@@ -18,6 +18,7 @@ type CapabilitiesResponse = { tools: Capability[] };
 const GROUP_ORDER = [
   "Cash artifacts",
   "Cash collection",
+  "Inbound",
   "Social",
   "Files",
   "Code",

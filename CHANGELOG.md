@@ -7,6 +7,19 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`email.inbox.read` tool — surfaces inbound leads without state change.**
+  AUTO-tier IMAP fetch that reads up to N recent (unread) messages and
+  returns structured rows (from address + name, subject, snippet,
+  date, has_attachment). Selects the folder with ``readonly=True`` —
+  we do NOT mark messages as read on the server, move them, or delete.
+  Credentials env-only (``IMAP_HOST`` + ``IMAP_USER`` +
+  ``IMAP_PASSWORD``, optional ``IMAP_PORT``), read at call time only.
+  Honest constraints: (1) refuses plaintext IMAP (port 143) — SSL only;
+  (2) body snippet capped at 500 chars per message — full bodies are a
+  read-the-message-later concern; (3) attachments not parsed; (4) does
+  NOT classify a message as a "lead" — returns structured rows, the
+  planner decides. Output ``Taint.UNTRUSTED``. New capabilities group
+  ``Inbound`` to keep inbound surface separate from outbound drafts.
 - **`web.automate` tool — APPROVE-tier interactive web automation.**
   Sibling to ``web.scrape``: where scrape is a read-only render,
   automate performs a small declared sequence of actions

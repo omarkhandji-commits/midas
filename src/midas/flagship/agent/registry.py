@@ -43,6 +43,7 @@ from .tools.cash import (
 from .tools.code import plan_code_run
 from .tools.code_complex import plan_code_complex
 from .tools.data_io import csv_read, json_read, plan_csv_write, plan_json_write
+from .tools.email_inbox import read_inbox
 from .tools.fs import fs_list, fs_read, plan_fs_write
 from .tools.fsguard import FsGuard
 from .tools.http import as_tool_payload as _http_payload
@@ -254,6 +255,22 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # email.inbox.read — AUTO-tier IMAP fetch. Read-only (readonly=True at
+    # SELECT), refuses plaintext port 143, surfaces lead signals only.
+    ts.register(
+        Tool(
+            name="email.inbox.read",
+            action="read_local_files",
+            fn=lambda folder="INBOX", limit=10, unread_only=True: read_inbox(
+                folder=folder,
+                limit=int(limit),
+                unread_only=bool(unread_only),
+            ).as_dict(),
+            output_taint=Taint.UNTRUSTED,
+            has_egress=True,
+        )
+    )
+
     # web.automate — APPROVE-tier interactive automation. Egress at execute time.
     ts.register(
         Tool(

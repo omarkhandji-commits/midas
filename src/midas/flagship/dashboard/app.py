@@ -2062,6 +2062,8 @@ _CAPABILITY_GROUPS: dict[str, str] = {
     "proposal.": "Cash artifacts",
     "quote.": "Cash artifacts",
     "adcopy.": "Cash artifacts",
+    "email.draft": "Cash artifacts",
+    "email.inbox.": "Inbound",
     "email.": "Cash artifacts",
     "invoice.": "Cash artifacts",
     "voice.": "Cash artifacts",
