@@ -7,6 +7,16 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Voice synthesis tool (`voice.synthesize`).** Provider-agnostic TTS,
+  sibling pattern to ``image.draft``: planner generates audio bytes,
+  stores base64 in the approval payload with sha256; executor writes
+  through ``execute_fs_write`` after approval. Two backends ship:
+  ``offline`` (deterministic stdlib WAV — short 440Hz tone + silence
+  scaled by script length, always available, honest placeholder) and
+  ``openai`` (opt-in, ``tts-1``, requires ``OPENAI_API_KEY``, validates
+  voice name against the supported set up front). The plan refuses to
+  mislabel format — if the backend produced ``.wav`` but the path says
+  ``.mp3``, the receipt would lie, so we ``raise`` instead.
 - **Sub-agent Claude Code (`code.complex`).** Delegates heavy / multi-file
   coding tasks to the operator's local ``claude`` CLI rather than
   reimplementing that engine. Plan validates prompt + workdir; payload

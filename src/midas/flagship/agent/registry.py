@@ -53,6 +53,7 @@ from .tools.sheet import plan_sheet_write, sheet_read
 from .tools.skill import skill_index, skill_load
 from .tools.social import plan_social_publish
 from .tools.stripe_pay import plan_payment_link
+from .tools.voice_synth import plan_voice_synth
 from .tools.web_scrape import _as_tool_payload as _scrape_payload
 from .tools.web_scrape import web_scrape
 
@@ -480,6 +481,22 @@ def build_default_toolset(
                 )
             ),
             output_taint=Taint.UNTRUSTED,
+            has_egress=True,
+        )
+    )
+
+    # voice.synthesize — TTS, sibling pattern to image.draft. Offline backend
+    # is always available; openai backend egresses with operator's key.
+    ts.register(
+        Tool(
+            name="voice.synthesize",
+            action="repo_write",
+            fn=lambda path, text, provider="offline", voice="alloy": _as_dict(
+                plan_voice_synth(
+                    guard, path, text=text, provider=provider, voice=voice
+                )
+            ),
+            output_taint=Taint.TRUSTED,
             has_egress=True,
         )
     )

@@ -403,6 +403,7 @@ def _register_cash_builders() -> None:
         execute_quote,
     )
     from .tools.image import execute_image_bytes
+    from .tools.voice_synth import execute_voice_bytes
 
     _CASH_BUILDERS.update(
         {
@@ -412,8 +413,9 @@ def _register_cash_builders() -> None:
             "proposal.draft": execute_proposal,
             "quote.draft": execute_quote,
             "adcopy.draft": execute_adcopy,
-            # Image returns bytes; execute_fs_write accepts bytes natively.
+            # Image + voice return bytes; execute_fs_write accepts bytes natively.
             "image.draft": execute_image_bytes,
+            "voice.synthesize": execute_voice_bytes,
         }
     )
 
@@ -442,6 +444,7 @@ _HANDLERS = {
     "quote.draft": _cash_handler,
     "adcopy.draft": _cash_handler,
     "image.draft": _cash_handler,
+    "voice.synthesize": _cash_handler,
     "social.publish": _execute_social_publish,
     "stripe.payment_link": _execute_stripe_payment_link,
     "code.complex": _execute_code_complex,
