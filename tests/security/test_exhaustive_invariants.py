@@ -303,3 +303,52 @@ def test_heartbeat_zero_niches_returns_empty(tmp_path: Path) -> None:
     report = hb.run_once(niches=[])
     assert report.stopped_reason == "no niches"
     assert report.approvals_queued == 0
+
+
+# ── Phase 4 — social.publish invariants ──────────────────────────────────────
+
+
+def test_social_publish_plan_does_not_egress() -> None:
+    """A plan must never trigger an HTTP call. We verify by deleting every
+    credential env var: if any backend egressed at plan time, the test would
+    raise SocialAdapterError — instead it must succeed cleanly.
+    """
+    import os
+
+    from midas.flagship.agent.tools.fsguard import FsGuard
+    from midas.flagship.agent.tools.social import plan_social_publish
+
+    for var in ("X_BEARER_TOKEN", "TWITTER_BEARER_TOKEN", "LINKEDIN_ACCESS_TOKEN"):
+        os.environ.pop(var, None)
+    workspace = Path(__file__).parent
+    plan = plan_social_publish(
+        FsGuard(workspace=workspace.resolve()),
+        platform="x",
+        text="hello",
+        account_handle="@me",
+    )
+    assert plan.sha256_intent  # planned without any network call
+
+
+def test_social_publish_executor_refuses_drift() -> None:
+    """Tamper with the payload between approval and execute — must be refused."""
+    from midas.flagship.agent.tools.social import (
+        SocialAdapterError,
+        StubSocialAdapter,
+        _hash_intent,
+        execute_social_publish,
+        register_adapter,
+    )
+
+    register_adapter(StubSocialAdapter())
+    payload = {
+        "platform": "stub",
+        "text": "evil tampered text",
+        "account_handle": "@me",
+        "media_paths": [],
+        "sha256_intent": _hash_intent(
+            platform="stub", handle="@me", text="original safe text", media=[]
+        ),
+    }
+    with pytest.raises(SocialAdapterError, match="intent hash drifted"):
+        execute_social_publish(payload)
