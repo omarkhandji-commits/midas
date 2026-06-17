@@ -15,9 +15,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from midas.core.config.loader import AppConfig
-from midas.core.config.models import Autonomy, ProvidersConfig
+from midas.core.config.models import Autonomy, ProvidersConfig, RoleConfig
 from midas.core.providers import ProviderSpec, catalog, diagnose_providers
 from midas.core.router import ChatResult, LLMRouter
+from midas.flagship.onboard import upsert_env
+from midas.flagship.provider_defaults import cheap_model_for
 
 _KEYCHAIN_SERVICE = "midas-agent"
 _THEMES = {"system", "light", "dark"}
@@ -93,10 +95,15 @@ class ProviderManager:
         vault: SecretVault,
         *,
         env: MutableMapping[str, str] | None = None,
+        env_path: Path | None = None,
     ) -> None:
         self.config = config
         self.vault = vault
         self.env = env if env is not None else os.environ
+        # When set, ``add()`` persists ``MIDAS_MODEL_CHEAP`` to this ``.env`` file
+        # the first time a usable key is stored, so the agent works immediately
+        # without a restart. Left ``None`` in tests that pass a fresh dict env.
+        self.env_path = env_path
 
     def list_statuses(self) -> list[dict[str, Any]]:
         return [self.status(name) for name in self._provider_names()]
@@ -156,7 +163,49 @@ class ProviderManager:
             raise ValueError(f"{name} does not accept a base URL")
 
         self.apply_to_environment()
+        if api_key:
+            self._wire_cheap_role(name)
         return self.status(name)
+
+    def _wire_cheap_role(self, name: str) -> None:
+        """First-time wiring: point the ``cheap`` role at this provider's default.
+
+        Only acts when (1) we know a default model for the provider, (2) no
+        explicit ``MIDAS_MODEL_CHEAP`` is already set (env wins over our guess),
+        and (3) the current ``cheap`` role is empty or points to a provider that
+        is not configured. The router reads ``self.config.roles`` lazily, so the
+        in-process mutation takes effect on the next call — no restart needed.
+        """
+        if self.env.get("MIDAS_MODEL_CHEAP"):
+            return
+        model = cheap_model_for(name)
+        if not model:
+            return
+        current = self.config.roles.get("cheap")
+        if current and current.primary and self._role_is_satisfied(current.primary):
+            return
+        self.config.roles["cheap"] = RoleConfig(
+            primary=model,
+            fallbacks=current.fallbacks if current else [],
+        )
+        self.env["MIDAS_MODEL_CHEAP"] = model
+        if self.env_path is not None:
+            upsert_env(self.env_path, {"MIDAS_MODEL_CHEAP": model})
+
+    def _role_is_satisfied(self, model_id: str) -> bool:
+        """A ``provider/model`` id is satisfied if that provider is configured.
+
+        Used by ``_wire_cheap_role`` so we never overwrite a role that already
+        points to a working provider (respect prior operator decisions).
+        """
+        if "/" not in model_id:
+            return False
+        provider, _ = model_id.split("/", 1)
+        try:
+            status = self.status(provider)
+        except ValueError:
+            return False
+        return bool(status.get("configured"))
 
     def remove(self, provider: str) -> dict[str, Any]:
         name = _normalise_provider(provider)

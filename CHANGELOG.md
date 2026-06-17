@@ -7,6 +7,20 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Browser opens already signed in.** `midas init` (and `midas dashboard`)
+  now start the local console and open the browser on a magic sign-in link
+  (single-use, loopback-only). No more terminal token to copy. `--no-launch`
+  keeps the old behavior; `midas dashboard --show-link` prints the link in
+  the rare case the browser doesn't open.
+- **Interactive onboarding wizard.** The `/start` page is now a four-step
+  guided flow: pick a model (Ollama detected automatically or paste a cloud
+  key with the provider auto-inferred from the prefix), choose a notification
+  channel, see how Midas works, run a first cash move — all without leaving
+  the page. `GET /api/onboard/detect-ollama` and `GET /api/onboard/state`
+  back the wizard.
+- **Shared provider-defaults table** (`src/midas/flagship/provider_defaults.py`)
+  mutualised between `midas init` and the dashboard's "add provider" flow,
+  so the same default `cheap` model is picked through either surface.
 - **One-command onboarding.** `midas init` detects a running local model
   (Ollama) or takes a single API key (provider inferred from the prefix:
   OpenAI, Anthropic, OpenRouter, Groq, Google), writes config and `.env`,
@@ -47,6 +61,16 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Live eval lane.** `midas eval --suite live` runs τ-bench cases against a
   real local model (Ollama by default). The offline deterministic suite
   remains the gate; the live lane is opt-in.
+
+### Fixed
+
+- **Provider key added in the dashboard now wires the cheap role.** Previously
+  pasting a key in `/providers` stored it in the OS keychain but left the
+  `cheap` role pointing elsewhere, so the agent silently kept using whatever
+  default model `providers.yml` named — even when nothing was configured for
+  it. `ProviderManager.add()` now writes `MIDAS_MODEL_CHEAP` to `.env` and
+  mutates the in-process role on first usable key, and respects any explicit
+  operator choice already in the environment.
 
 ### Changed
 

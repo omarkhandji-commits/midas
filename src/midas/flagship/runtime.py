@@ -167,7 +167,11 @@ def build_runtime(base_dir: str | Path) -> Runtime:
     base = Path(base_dir)
     state = _state_dir(base)
     config = load_app_config(base)
-    providers = ProviderManager(config.providers, KeyringSecretVault())
+    providers = ProviderManager(
+        config.providers,
+        KeyringSecretVault(),
+        env_path=base / ".env",
+    )
     providers.apply_to_environment()
     channels = ChannelManager(KeyringSecretVault())
 

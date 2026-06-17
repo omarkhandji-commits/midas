@@ -101,6 +101,13 @@ def init(
     no_test: bool = typer.Option(
         False, "--no-test", help="Skip the one-token smoke test."
     ),
+    no_launch: bool = typer.Option(
+        False,
+        "--no-launch",
+        help="Do not start the local dashboard or open the browser.",
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", help="Loopback host only."),
+    port: int = typer.Option(8765, "--port", help="Local dashboard port."),
 ) -> None:
     """One command to a working setup: detect a local model or take an API key.
 
@@ -149,28 +156,63 @@ def init(
     )
     typer.echo(f"State ready: {rt.ledger.path.parent}")
 
-    if no_test:
-        typer.echo("Skipped smoke test. Run `midas earn \"<niche>\"` to start.")
+    if not no_test:
+        typer.echo("Checking your model responds...")
+        try:
+            res = rt.router.complete(
+                [{"role": "user", "content": "Reply with the single word: ready"}],
+                role="cheap",
+                agent="init-smoke",
+                est_usd=0.001,
+            )
+            ok = "ready" in (res.text or "").lower()
+            if ok:
+                typer.echo(f"Model OK: {res.model} (cost ${res.cost_usd:.4f}).")
+            else:
+                typer.echo(f"Model replied unexpectedly: {res.text[:80]!r}")
+                typer.echo("Setup is saved; you can still run `midas earn`.")
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(f"Could not reach the model: {exc}")
+            typer.echo("Setup is saved. Run `midas providers doctor` for details.")
+
+    if no_launch:
+        typer.echo('\nReady. Try:  midas earn "your niche"  (or: midas dashboard)')
         return
 
-    typer.echo("Running a one-token smoke test...")
-    try:
-        res = rt.router.complete(
-            [{"role": "user", "content": "Reply with the single word: ready"}],
-            role="cheap",
-            agent="init-smoke",
-            est_usd=0.001,
-        )
-        ok = "ready" in (res.text or "").lower()
-        if ok:
-            typer.echo(f"LLM responds. ({res.model}, cost ${res.cost_usd:.4f})")
-            typer.echo('\nYou are set. Try:  midas earn "your niche"')
-        else:
-            typer.echo(f"LLM replied but unexpected text: {res.text[:80]!r}")
-            typer.echo("Setup is written; you can still run `midas earn`.")
-    except Exception as exc:  # noqa: BLE001
-        typer.echo(f"Smoke test could not reach the model: {exc}")
-        typer.echo("Config is written. Check `midas providers doctor`.")
+    _launch_console(rt, host=host, port=port, open_browser=True)
+
+
+def _launch_console(
+    rt: Any, *, host: str, port: int, open_browser: bool, show_link: bool = False
+) -> None:
+    """Start the dashboard in this process and open the browser already signed in.
+
+    The session capability lives in the magic URL we hand to the OS browser. We do
+    not show it in the terminal by default — the user just sees their dashboard
+    open. ``show_link=True`` is the rescue path for the rare "no browser opened"
+    case (``midas dashboard --show-link``).
+    """
+    import uvicorn
+
+    from midas.flagship.dashboard import create_app
+
+    deps = rt.dashboard_deps(allowed_host=f"{host}:{port}")
+    token = deps.login_token.value
+    url = f"http://{host}:{port}"
+    magic = f"{url}/login?token={token}"
+    typer.echo(f"\nMidas console opening at {url}")
+    if show_link:
+        typer.echo(f"Direct link: {magic}")
+    if open_browser:
+        try:
+            import threading
+            import webbrowser
+
+            threading.Timer(0.6, lambda: webbrowser.open(magic)).start()
+        except Exception:  # noqa: BLE001 — never let browser failure crash the server
+            pass
+    typer.echo("Press Ctrl+C to stop.")
+    uvicorn.run(create_app(deps, bind_host=host), host=host, port=port, log_level="warning")
 
 
 @app.command()
@@ -210,18 +252,22 @@ def dashboard(
     host: str = typer.Option("127.0.0.1", "--host", help="Loopback host only."),
     port: int = typer.Option(8765, "--port", help="Local dashboard port."),
     base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+    no_launch: bool = typer.Option(
+        False, "--no-launch", help="Don't open a browser window."
+    ),
+    show_link: bool = typer.Option(
+        False,
+        "--show-link",
+        help="Print the magic sign-in link (rescue path if the browser fails to open).",
+    ),
 ) -> None:
     """Start the local Midas Operator Console."""
-    from midas.flagship.dashboard import create_app
     from midas.flagship.runtime import build_runtime
 
     rt = build_runtime(base_dir)
-    deps = rt.dashboard_deps(allowed_host=f"{host}:{port}")
-    typer.echo(f"Dashboard login token: {deps.login_token.value}")
-    typer.echo(f"Opening local console at http://{host}:{port}")
-    import uvicorn
-
-    uvicorn.run(create_app(deps, bind_host=host), host=host, port=port, log_level="warning")
+    _launch_console(
+        rt, host=host, port=port, open_browser=not no_launch, show_link=show_link
+    )
 
 
 @app.command()
@@ -241,13 +287,20 @@ def up(
 
     rt = build_runtime(base_dir)
     deps = rt.dashboard_deps(allowed_host=f"{host}:{port}")
-    typer.echo(f"Dashboard login token: {deps.login_token.value}")
-    typer.echo(f"Starting local console at http://{host}:{port}")
+    magic = f"http://{host}:{port}/login?token={deps.login_token.value}"
+    typer.echo(f"Midas console opening at http://{host}:{port}")
     telegram_config = rt.channels.telegram_config()
     if telegram_config is None:
         typer.echo("Telegram listener: not configured")
     else:
         typer.echo("Telegram listener: configured")
+    try:
+        import threading
+        import webbrowser
+
+        threading.Timer(0.6, lambda: webbrowser.open(magic)).start()
+    except Exception:  # noqa: BLE001
+        pass
 
     async def _serve() -> None:
         tasks = []

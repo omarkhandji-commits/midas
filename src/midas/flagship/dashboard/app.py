@@ -133,10 +133,33 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
 
     # ── routes ────────────────────────────────────────────────────────────────
     @app.get("/login", response_class=HTMLResponse)
-    def login_form(request: Request) -> Any:
+    def login_form(request: Request, token: str | None = None) -> Any:
+        # Magic-link path: ``midas init`` opens the browser on /login?token=<one-time>
+        # so first-time users land already authenticated. Token is single-use and
+        # never written to disk — patron Jupyter, loopback-only.
+        if token:
+            if deps.login_token.consume(token):
+                return _issue_session_redirect(request)
+            return templates.TemplateResponse(
+                request,
+                "login.html",
+                {
+                    "nonce": request.state.nonce,
+                    "error": "This link is no longer valid. Paste the token below.",
+                },
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
         return templates.TemplateResponse(
             request, "login.html", {"nonce": request.state.nonce}
         )
+
+    def _issue_session_redirect(request: Request) -> Response:
+        session = deps.sessions.issue()
+        csrf = issue_csrf_token()
+        resp = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+        resp.set_cookie(SESSION_COOKIE, session, httponly=True, samesite="strict")
+        resp.set_cookie(CSRF_COOKIE, csrf, httponly=False, samesite="strict")
+        return resp
 
     @app.post("/login")
     def login_submit(request: Request, token: str = Form(...)) -> Response:
@@ -567,6 +590,57 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         if deps.channels is None:
             return _json(503, {"error": "channels disabled"})
         return _json(200, {"channels": deps.channels.list_statuses()})
+
+    @app.get("/api/onboard/detect-ollama")
+    def api_onboard_detect_ollama(request: Request) -> Response:
+        """Best-effort local Ollama detection for the /start wizard.
+
+        Returns the installed model list and a recommended pick. Failure to reach
+        Ollama is not an error — we simply report no local model so the wizard
+        falls back to "paste a cloud API key".
+        """
+        _require_session(request)
+        from midas.flagship.onboard import detect_ollama, pick_ollama_model
+
+        try:
+            models = detect_ollama()
+        except Exception:  # noqa: BLE001 — local network probe; never crash the UI
+            models = []
+        chosen = pick_ollama_model(models)
+        return _json(200, {"models": models, "chosen": chosen})
+
+    @app.get("/api/onboard/state")
+    def api_onboard_state(request: Request) -> Response:
+        """One-shot snapshot for the wizard: provider ready, channel ready, first action done.
+
+        The wizard reads this on mount to resume at the right step if interrupted.
+        """
+        _require_session(request)
+        has_provider = False
+        if deps.providers is not None:
+            has_provider = any(
+                p.get("configured") for p in deps.providers.list_statuses()
+            )
+        has_channel = False
+        if deps.channels is not None:
+            has_channel = any(
+                c.get("connected") for c in deps.channels.list_statuses()
+            )
+        # First action = any non-system receipt in the ledger.
+        has_first_run = False
+        if deps.ledger is not None:
+            for r in deps.ledger:
+                if r.body.run_id not in {"init", "setup", "dashboard"}:
+                    has_first_run = True
+                    break
+        return _json(
+            200,
+            {
+                "has_provider": has_provider,
+                "has_channel": has_channel,
+                "has_first_run": has_first_run,
+            },
+        )
 
     @app.post("/api/channels/telegram")
     async def api_channels_telegram_connect(request: Request) -> Response:

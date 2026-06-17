@@ -7,6 +7,9 @@
     Paste the one-time token printed in your terminal. It is consumed on use;
     a new token is generated each time MIDAS starts.
   </p>
+  {% if error %}
+  <p class="m-login__lede" role="alert" style="color: hsl(var(--warn));">{{ error }}</p>
+  {% endif %}
   <form class="m-login__form" method="post" action="/login" autocomplete="off">
     <label class="m-login__label" for="token">One-time token</label>
     <input class="m-login__input" id="token" name="token"

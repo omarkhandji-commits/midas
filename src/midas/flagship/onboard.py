@@ -18,6 +18,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from midas.flagship.provider_defaults import DEFAULT_CHEAP_MODEL
+
 _OLLAMA_DEFAULT = "http://127.0.0.1:11434"
 
 
@@ -28,20 +30,22 @@ class KeyProfile:
     model: str  # LiteLLM-style id for the cheap role
 
 
-# Order matters: more specific prefixes first.
+# Order matters: more specific prefixes first. The model id comes from the
+# shared table in ``provider_defaults`` so the dashboard's ``add provider`` flow
+# resolves to the same default.
 def provider_from_key(key: str) -> KeyProfile | None:
     """Map an API key to (provider, env var, default cheap model) by prefix."""
     k = key.strip()
     if k.startswith("sk-ant-"):
-        return KeyProfile("anthropic", "ANTHROPIC_API_KEY", "anthropic/claude-3-5-haiku-latest")
+        return KeyProfile("anthropic", "ANTHROPIC_API_KEY", DEFAULT_CHEAP_MODEL["anthropic"])
     if k.startswith("sk-or-"):
-        return KeyProfile("openrouter", "OPENROUTER_API_KEY", "openrouter/auto")
+        return KeyProfile("openrouter", "OPENROUTER_API_KEY", DEFAULT_CHEAP_MODEL["openrouter"])
     if k.startswith("gsk_"):
-        return KeyProfile("groq", "GROQ_API_KEY", "groq/llama-3.1-8b-instant")
+        return KeyProfile("groq", "GROQ_API_KEY", DEFAULT_CHEAP_MODEL["groq"])
     if k.startswith("sk-proj-") or k.startswith("sk-"):
-        return KeyProfile("openai", "OPENAI_API_KEY", "openai/gpt-4o-mini")
+        return KeyProfile("openai", "OPENAI_API_KEY", DEFAULT_CHEAP_MODEL["openai"])
     if k.startswith("AIza"):
-        return KeyProfile("google", "GEMINI_API_KEY", "gemini/gemini-1.5-flash")
+        return KeyProfile("google", "GEMINI_API_KEY", DEFAULT_CHEAP_MODEL["google"])
     return None
 
 
