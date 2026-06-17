@@ -7,6 +7,17 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Capabilities page.** A new `/capabilities` route lists every registered
+  tool grouped by purpose (files, cash artifacts, code, research, MCP), with
+  honest badges: AUTO vs APPROVE (read from the live policy), egress, and
+  untrusted-output. The list is generated server-side from
+  `build_default_toolset()` — adding a tool to the registry surfaces it in
+  the UI without touching the front end. Backed by `GET /api/capabilities`.
+- **Per-post ROI.** `compute_post_roi` joins receipts tagged with
+  `platform` + `post_id` to operator-recorded outcomes keyed by
+  `platform:post_id`. Cost still comes from the signed chain; revenue still
+  comes only from outcomes — no projections. `build_post_outcomes_index`
+  separates per-post keys from run-level keys so the two ledgers don't mix.
 - **Browser opens already signed in.** `midas init` (and `midas dashboard`)
   now start the local console and open the browser on a magic sign-in link
   (single-use, loopback-only). No more terminal token to copy. `--no-launch`

@@ -609,6 +609,47 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         chosen = pick_ollama_model(models)
         return _json(200, {"models": models, "chosen": chosen})
 
+    @app.get("/api/capabilities")
+    def api_capabilities(request: Request) -> Response:
+        """Serialise the registered toolset so the dashboard never drifts.
+
+        Source of truth is ``build_default_toolset()`` — the same call the agent
+        loop uses. Each entry carries the policy tier the Sentinel will apply at
+        call time, so the UI can render an honest AUTO/APPROVE badge without
+        hand-maintained lists. Tier reflects the *current* policy, not assumptions.
+        """
+        _require_session(request)
+        if deps.sentinel is None or deps.fs_guard is None:
+            return _json(503, {"error": "capabilities unavailable"})
+        from midas.core.sentinel.risk_tiers import classify
+        from midas.flagship.agent import build_default_toolset
+
+        ts = build_default_toolset(
+            sentinel=deps.sentinel,
+            guard=deps.fs_guard,
+            ledger=deps.ledger,
+            approvals=deps.queue,
+            run_id="capabilities-view",
+            search=deps.search,
+            fetcher=deps.fetcher,
+            verifier=deps.verifier,
+        )
+        policy = deps.sentinel.policy
+        items: list[dict[str, Any]] = []
+        for tool in sorted(ts._tools.values(), key=lambda t: t.name):  # noqa: SLF001
+            tier = classify(tool.action, policy).value
+            items.append(
+                {
+                    "name": tool.name,
+                    "action": tool.action,
+                    "tier": tier,
+                    "taint": tool.output_taint.value,
+                    "has_egress": tool.has_egress,
+                    "group": _capability_group(tool.name),
+                }
+            )
+        return _json(200, {"tools": items})
+
     @app.get("/api/onboard/state")
     def api_onboard_state(request: Request) -> Response:
         """One-shot snapshot for the wizard: provider ready, channel ready, first action done.
@@ -1948,6 +1989,36 @@ def _resolve(deps: DashboardDeps, req_id: int, *, approve: bool) -> Response:
         # 409 = state conflict (already resolved). Idempotency surfaces cleanly.
         return _json(409, {"error": str(exc)})
     return _json(200, {"ok": True, "id": req_id})
+
+
+_CAPABILITY_GROUPS: dict[str, str] = {
+    "fs.": "Files",
+    "pdf.": "Files",
+    "sheet.": "Files",
+    "csv.": "Files",
+    "json.": "Files",
+    "artifact.": "Cash artifacts",
+    "landing.": "Cash artifacts",
+    "product.": "Cash artifacts",
+    "outreach.": "Cash artifacts",
+    "proposal.": "Cash artifacts",
+    "quote.": "Cash artifacts",
+    "adcopy.": "Cash artifacts",
+    "email.": "Cash artifacts",
+    "invoice.": "Cash artifacts",
+    "voice.": "Cash artifacts",
+    "research.": "Research",
+    "http.": "Research",
+    "mcp.": "External tools (MCP)",
+    "code.": "Code",
+}
+
+
+def _capability_group(name: str) -> str:
+    for prefix, group in _CAPABILITY_GROUPS.items():
+        if name.startswith(prefix):
+            return group
+    return "Other"
 
 
 def _approval_json(req: Any) -> dict[str, Any]:

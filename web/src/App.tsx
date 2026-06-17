@@ -1,6 +1,7 @@
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { OnboardingPage } from "@/pages/Onboarding";
+import { CapabilitiesPage } from "@/pages/Capabilities";
 import { ChatPage } from "@/pages/Chat";
 import { MissionsPage } from "@/pages/Missions";
 import { ArtifactsPage } from "@/pages/Artifacts";
@@ -24,6 +25,7 @@ const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { path: "start", element: <OnboardingPage /> },
+      { path: "capabilities", element: <CapabilitiesPage /> },
       { index: true, element: <ChatPage /> },
       { path: "missions", element: <MissionsPage /> },
       { path: "assets", element: <AssetsPage /> },
