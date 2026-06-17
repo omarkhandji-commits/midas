@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
 import { api, ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 type DetectResult = { models: string[]; chosen: string | null };
 type StateResult = {
@@ -422,11 +423,34 @@ function StepExplain({ onDone }: { onDone: () => void }) {
 }
 
 // ── Step 4: first real action ──────────────────────────────────────────────────
+type Persona = {
+  id: string;
+  label: string;
+  tagline: string;
+  first_action: string;
+  recommended_skills: string[];
+  default_currency: string;
+};
+
 function StepFirstAction() {
   const [niche, setNiche] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [pickedPersona, setPickedPersona] = useState<string>("");
+
+  useEffect(() => {
+    api
+      .get<{ personas: Persona[] }>("/api/personas")
+      .then((r) => setPersonas(r.personas))
+      .catch(() => undefined); // non-blocking; the wizard still works without
+  }, []);
+
+  const choosePersona = (p: Persona) => {
+    setPickedPersona(p.id);
+    setNiche(p.first_action);
+  };
 
   const run = async () => {
     setError(null);
@@ -463,6 +487,31 @@ function StepFirstAction() {
           Type a niche. Midas scans, scores, drafts a daily revenue move, and queues an
           approval card. Nothing leaves your machine without your click.
         </p>
+        {personas.length > 0 && (
+          <div className="mt-4 grid gap-2">
+            <p className="text-xs font-mono uppercase tracking-[0.08em] text-mute">
+              Or pick a starter persona
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {personas.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => choosePersona(p)}
+                  className={cn(
+                    "border p-3 text-left text-sm transition-colors",
+                    pickedPersona === p.id
+                      ? "border-accent bg-accent/5"
+                      : "border-rule hover:border-accent/60 hover:bg-rule-soft/40",
+                  )}
+                >
+                  <p className="font-medium">{p.label}</p>
+                  <p className="mt-0.5 text-xs text-mute">{p.tagline}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="mt-4 grid gap-3">
           <label className="grid gap-1.5 text-sm font-medium">
             Your niche
