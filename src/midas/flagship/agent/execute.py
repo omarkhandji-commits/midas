@@ -261,6 +261,7 @@ def _register_cash_builders() -> None:
         execute_proposal,
         execute_quote,
     )
+    from .tools.image import execute_image_bytes
 
     _CASH_BUILDERS.update(
         {
@@ -270,6 +271,8 @@ def _register_cash_builders() -> None:
             "proposal.draft": execute_proposal,
             "quote.draft": execute_quote,
             "adcopy.draft": execute_adcopy,
+            # Image returns bytes; execute_fs_write accepts bytes natively.
+            "image.draft": execute_image_bytes,
         }
     )
 
@@ -297,4 +300,5 @@ _HANDLERS = {
     "proposal.draft": _cash_handler,
     "quote.draft": _cash_handler,
     "adcopy.draft": _cash_handler,
+    "image.draft": _cash_handler,
 }

@@ -7,6 +7,24 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Image draft tool (`image.draft`).** Provider-agnostic, approval-gated. The
+  planner produces PNG bytes at plan time and stores them base64-encoded in the
+  approval payload, so the reviewer sees the exact sha256 before any write hits
+  disk. Two backends ship: ``offline`` (deterministic Pillow placeholder, in the
+  ``multimodal`` extra) and ``openai`` (opt-in, requires ``OPENAI_API_KEY`` —
+  uses the operator's own key, never silent egress). The post-approval executor
+  decodes bytes through the same ``execute_fs_write`` chokepoint every other
+  artifact uses. Honest: the offline backend is a placeholder, not AI-generated
+  — the rendered text on the canvas makes that unmistakable. New backends drop
+  into ``_BACKENDS`` without API changes.
+- **How-it-works page (`/how-it-works`).** A grand-public explainer in the
+  dashboard: the 3-phrase contract (auto / approve / signed proof), a tour of
+  every screen, side-by-side "what it can do" / "what it never does",
+  collapsible FAQ, and a security summary. Pure React.
+- **Unified Connections page (`/connections`).** One screen that summarizes the
+  brain (LLM providers) and channels (Telegram/Discord/Slack/WhatsApp/Email/SMS)
+  with readiness chips and deep-links to the existing manage pages. Reuses
+  ``/api/providers`` + ``/api/channels``; no new endpoints.
 - **Capabilities page.** A new `/capabilities` route lists every registered
   tool grouped by purpose (files, cash artifacts, code, research, MCP), with
   honest badges: AUTO vs APPROVE (read from the live policy), egress, and

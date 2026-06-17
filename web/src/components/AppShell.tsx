@@ -11,12 +11,14 @@ import {
   Radar,
   LineChart,
   Plug,
+  PlugZap,
   KeyRound,
   CalendarClock,
   Sparkles,
   Settings as SettingsIcon,
   Shield,
   FileBox,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +30,7 @@ const groups: NavGroup[] = [
     label: "Work",
     items: [
       { to: "/start", label: "Start", icon: ClipboardCheck },
+      { to: "/how-it-works", label: "How it works", icon: BookOpen },
       { to: "/", label: "Chat", icon: MessageSquare },
       { to: "/missions", label: "Missions", icon: Compass },
       { to: "/assets", label: "Asset Studio", icon: Wand2 },
@@ -46,6 +49,7 @@ const groups: NavGroup[] = [
   {
     label: "Connect",
     items: [
+      { to: "/connections", label: "Connections", icon: PlugZap },
       { to: "/channels", label: "Channels", icon: Plug },
       { to: "/providers", label: "Providers", icon: KeyRound },
     ],

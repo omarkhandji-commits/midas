@@ -46,6 +46,7 @@ from .tools.fs import fs_list, fs_read, plan_fs_write
 from .tools.fsguard import FsGuard
 from .tools.http import as_tool_payload as _http_payload
 from .tools.http import http_fetch
+from .tools.image import plan_image
 from .tools.pdf import pdf_extract
 from .tools.sheet import plan_sheet_write, sheet_read
 
@@ -365,6 +366,21 @@ def build_default_toolset(
                 plan_adcopy(guard, path, product=product, audience=audience, variants=variants)
             ),
             output_taint=Taint.TRUSTED,
+        )
+    )
+
+    # image.draft — provider-agnostic. The offline backend is always available;
+    # the openai backend egresses at plan-time when OPENAI_API_KEY is set. Bytes
+    # land in the approval payload; the file is written post-approval only.
+    ts.register(
+        Tool(
+            name="image.draft",
+            action="repo_write",
+            fn=lambda path, prompt, provider="offline", size="512x512": _as_dict(
+                plan_image(guard, path, prompt=prompt, provider=provider, size=size)
+            ),
+            output_taint=Taint.TRUSTED,
+            has_egress=True,  # openai backend egresses; offline does not
         )
     )
     return ts

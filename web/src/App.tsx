@@ -11,6 +11,8 @@ import { ProofsPage } from "@/pages/Proofs";
 import { MemoryPage } from "@/pages/Memory";
 import { OutcomesPage } from "@/pages/Outcomes";
 import { ChannelsPage } from "@/pages/Channels";
+import { ConnectionsPage } from "@/pages/Connections";
+import { HowItWorksPage } from "@/pages/HowItWorks";
 import { ProvidersPage } from "@/pages/Providers";
 import { MarketPage } from "@/pages/Market";
 import { SchedulePage } from "@/pages/Schedule";
@@ -26,6 +28,7 @@ const router = createBrowserRouter([
     children: [
       { path: "start", element: <OnboardingPage /> },
       { path: "capabilities", element: <CapabilitiesPage /> },
+      { path: "how-it-works", element: <HowItWorksPage /> },
       { index: true, element: <ChatPage /> },
       { path: "missions", element: <MissionsPage /> },
       { path: "assets", element: <AssetsPage /> },
@@ -34,6 +37,7 @@ const router = createBrowserRouter([
       { path: "proofs", element: <ProofsPage /> },
       { path: "memory", element: <MemoryPage /> },
       { path: "outcomes", element: <OutcomesPage /> },
+      { path: "connections", element: <ConnectionsPage /> },
       { path: "channels", element: <ChannelsPage /> },
       { path: "providers", element: <ProvidersPage /> },
       { path: "market", element: <MarketPage /> },
