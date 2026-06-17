@@ -15,8 +15,10 @@ import pytest
 
 from midas.flagship.agent.tools.fsguard import FsGuard
 from midas.flagship.agent.tools.social import (
+    InstagramAdapter,
     LinkedInAdapter,
     PublishResult,
+    RedditAdapter,
     SocialAdapterError,
     StubSocialAdapter,
     XTwitterAdapter,
@@ -186,3 +188,89 @@ def test_linkedin_adapter_refuses_media_in_this_slice(monkeypatch: pytest.Monkey
     adapter = LinkedInAdapter()
     with pytest.raises(SocialAdapterError, match="does not yet upload media"):
         adapter.publish(text="hi", media_paths=["x.png"], account_handle="me")
+
+
+# ── Reddit ────────────────────────────────────────────────────────────────
+
+
+def test_reddit_requires_subreddit_in_handle() -> None:
+    adapter = RedditAdapter()
+    with pytest.raises(SocialAdapterError, match="account_handle"):
+        adapter.publish(text="Title\n\nBody", media_paths=[], account_handle="")
+
+
+def test_reddit_refuses_media_in_this_slice() -> None:
+    adapter = RedditAdapter()
+    with pytest.raises(SocialAdapterError, match="text only"):
+        adapter.publish(text="Title\nBody", media_paths=["x.png"], account_handle="r/test")
+
+
+def test_reddit_requires_title_first_line() -> None:
+    adapter = RedditAdapter()
+    with pytest.raises(SocialAdapterError, match="needs a title"):
+        adapter.publish(text="   \nBody only", media_paths=[], account_handle="r/test")
+
+
+def test_reddit_refuses_overlong_title() -> None:
+    adapter = RedditAdapter()
+    huge_title = "x" * 301
+    with pytest.raises(SocialAdapterError, match="title max"):
+        adapter.publish(
+            text=f"{huge_title}\nbody",
+            media_paths=[],
+            account_handle="r/test",
+        )
+
+
+def test_reddit_without_creds_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in (
+        "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET",
+        "REDDIT_USERNAME", "REDDIT_PASSWORD",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    adapter = RedditAdapter()
+    with pytest.raises(SocialAdapterError, match="REDDIT_"):
+        adapter.publish(
+            text="Title\nBody", media_paths=[], account_handle="r/Entrepreneur"
+        )
+
+
+# ── Instagram ─────────────────────────────────────────────────────────────
+
+
+def test_instagram_refuses_text_only() -> None:
+    adapter = InstagramAdapter()
+    with pytest.raises(SocialAdapterError, match="requires media"):
+        adapter.publish(text="hi", media_paths=[], account_handle="@brand")
+
+
+def test_instagram_refuses_local_file_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INSTAGRAM_ACCESS_TOKEN", "fake")
+    monkeypatch.setenv("INSTAGRAM_USER_ID", "17841400000000000")
+    adapter = InstagramAdapter()
+    with pytest.raises(SocialAdapterError, match="public https URL"):
+        adapter.publish(
+            text="cap", media_paths=["./local.png"], account_handle="@brand"
+        )
+
+
+def test_instagram_refuses_carousel_in_this_slice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INSTAGRAM_ACCESS_TOKEN", "fake")
+    monkeypatch.setenv("INSTAGRAM_USER_ID", "17841400000000000")
+    adapter = InstagramAdapter()
+    with pytest.raises(SocialAdapterError, match="carousel"):
+        adapter.publish(
+            text="cap",
+            media_paths=["https://x.com/a.png", "https://x.com/b.png"],
+            account_handle="@brand",
+        )
+
+
+def test_instagram_without_credentials_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("INSTAGRAM_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("INSTAGRAM_USER_ID", raising=False)
+    adapter = InstagramAdapter()
+    with pytest.raises(SocialAdapterError, match="INSTAGRAM_ACCESS_TOKEN"):
+        adapter.publish(
+            text="cap", media_paths=["https://x.com/a.png"], account_handle="@brand"
+        )

@@ -7,6 +7,20 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Reddit social adapter (`RedditAdapter`).** Posts self-text submissions
+  via Reddit's API ``/api/submit``. Requires a script-type OAuth app and
+  four env vars: ``REDDIT_CLIENT_ID``, ``REDDIT_CLIENT_SECRET``,
+  ``REDDIT_USERNAME``, ``REDDIT_PASSWORD``. The post's title is the first
+  line of ``text``, the body is everything after. Honest constraint:
+  ``account_handle`` carries the target subreddit (``r/<sub>``) — Reddit is
+  sub-scoped, not handle-scoped, and we don't pretend otherwise.
+- **Instagram social adapter (`InstagramAdapter`).** Posts single images
+  with caption via the Meta Graph API (two-step container + publish).
+  Requires ``INSTAGRAM_ACCESS_TOKEN`` + ``INSTAGRAM_USER_ID`` (Business or
+  Creator, not personal). Honest constraints surfaced as ``SocialAdapterError``
+  rather than silent degrade: (1) text-only posts not supported by the
+  Instagram API; (2) the API needs a public HTTPS URL for the image, not a
+  local file path; (3) carousel (multi-image) ships next.
 - **`web.scrape` tool — rendered fetch with honest anti-bot defenses.**
   Runs the page through a clean headless Chromium (Playwright) so the agent
   sees what a human would on JS-rendered sites (Etsy, Reddit, Fiverr,

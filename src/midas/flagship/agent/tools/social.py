@@ -84,7 +84,10 @@ class SocialPublishPlan:
     meta: dict[str, Any] = field(default_factory=dict)
 
 
-_SUPPORTED_PLATFORMS = {"x", "twitter", "linkedin", "instagram", "facebook", "threads", "youtube"}
+_SUPPORTED_PLATFORMS = {
+    "x", "twitter", "linkedin", "instagram", "facebook",
+    "threads", "youtube", "reddit",
+}
 
 
 def _normalize_platform(platform: str) -> str:
@@ -382,6 +385,264 @@ class LinkedInAdapter:
         )
 
 
+# ── Reddit adapter (opt-in, requires Reddit script-type app credentials) ─────
+
+
+@dataclass
+class RedditAdapter:
+    """Posts a self (text) submission via the Reddit API.
+
+    Requires a Reddit script-type OAuth app and four env vars:
+    ``REDDIT_CLIENT_ID``, ``REDDIT_CLIENT_SECRET``, ``REDDIT_USERNAME``,
+    ``REDDIT_PASSWORD``. We use the password grant because it's the only flow
+    Reddit supports for script apps; production apps would use refresh tokens
+    instead — wiring that in is a one-line change in ``_oauth_token``.
+
+    Posting needs a target subreddit; we read it from ``account_handle``
+    (which carries ``r/<sub>`` for this adapter — same field, different
+    semantics per platform). This is honest: Reddit posts are sub-scoped,
+    not handle-scoped.
+    """
+
+    name: str = "reddit"
+    max_chars: int = 40_000
+
+    def publish(
+        self,
+        *,
+        text: str,
+        media_paths: list[str],
+        account_handle: str,
+    ) -> PublishResult:
+        if media_paths:
+            raise SocialAdapterError(
+                "reddit adapter posts text only in this slice; "
+                "image/link posts arrive next"
+            )
+        sub = account_handle.strip().lstrip("/")
+        if sub.lower().startswith("r/"):
+            sub = sub[2:]
+        if not sub:
+            raise SocialAdapterError(
+                "reddit needs the subreddit in account_handle (e.g. 'r/Entrepreneur')"
+            )
+        # First line of text is the title; rest is the body. This matches the
+        # newsletter / outreach pattern the cash artifacts already produce.
+        lines = text.split("\n", 1)
+        title = lines[0].strip()
+        body = lines[1].strip() if len(lines) > 1 else ""
+        if not title:
+            raise SocialAdapterError(
+                "reddit post needs a title (first line of text)"
+            )
+        if len(title) > 300:
+            raise SocialAdapterError(
+                f"reddit title max is 300 chars, got {len(title)}"
+            )
+
+        token = _reddit_oauth_token()
+        try:
+            import httpx
+        except ImportError as e:
+            raise SocialAdapterError(
+                "reddit adapter needs httpx; install with `pip install httpx`"
+            ) from e
+
+        try:
+            resp = httpx.post(
+                "https://oauth.reddit.com/api/submit",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": "midas-agent/1.0 (cash operator)",
+                },
+                data={
+                    "sr": sub,
+                    "kind": "self",
+                    "title": title,
+                    "text": body,
+                    "api_type": "json",
+                },
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(f"reddit submit request failed: {e}") from e
+        if resp.status_code != 200:
+            raise SocialAdapterError(
+                f"reddit /api/submit returned {resp.status_code}: "
+                f"{resp.text[:200]}"
+            )
+        json_body = (resp.json() or {}).get("json") or {}
+        if json_body.get("errors"):
+            raise SocialAdapterError(
+                f"reddit refused the post: {json_body['errors']}"
+            )
+        data = json_body.get("data") or {}
+        post_url = str(data.get("url") or "")
+        post_id = str(data.get("name") or "")  # t3_xxxx
+        if not post_id:
+            raise SocialAdapterError("reddit response is missing post fullname")
+        return PublishResult(
+            post_id=post_id,
+            permalink=post_url or f"https://reddit.com/r/{sub}/comments/{post_id}",
+            cost_usd=0.0,
+            raw_status="reddit_ok",
+        )
+
+
+def _reddit_oauth_token() -> str:
+    """Exchange Reddit script-app password creds for a short-lived bearer."""
+    client_id = os.environ.get("REDDIT_CLIENT_ID")
+    client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
+    username = os.environ.get("REDDIT_USERNAME")
+    password = os.environ.get("REDDIT_PASSWORD")
+    missing = [
+        n for n, v in (
+            ("REDDIT_CLIENT_ID", client_id),
+            ("REDDIT_CLIENT_SECRET", client_secret),
+            ("REDDIT_USERNAME", username),
+            ("REDDIT_PASSWORD", password),
+        ) if not v
+    ]
+    if missing:
+        raise SocialAdapterError(
+            f"reddit adapter needs env vars: {', '.join(missing)}"
+        )
+    try:
+        import httpx
+    except ImportError as e:
+        raise SocialAdapterError(
+            "reddit adapter needs httpx; install with `pip install httpx`"
+        ) from e
+    try:
+        resp = httpx.post(
+            "https://www.reddit.com/api/v1/access_token",
+            auth=(client_id or "", client_secret or ""),
+            data={"grant_type": "password", "username": username, "password": password},
+            headers={"User-Agent": "midas-agent/1.0 (cash operator)"},
+            timeout=30.0,
+        )
+    except httpx.HTTPError as e:
+        raise SocialAdapterError(f"reddit token request failed: {e}") from e
+    if resp.status_code != 200:
+        raise SocialAdapterError(
+            f"reddit /api/v1/access_token returned {resp.status_code}: "
+            f"{resp.text[:200]}"
+        )
+    token = str((resp.json() or {}).get("access_token") or "")
+    if not token:
+        raise SocialAdapterError("reddit token response is missing access_token")
+    return token
+
+
+# ── Instagram adapter (opt-in, requires Meta Graph API credentials) ──────────
+
+
+@dataclass
+class InstagramAdapter:
+    """Posts an image (with caption) via the Meta Graph API.
+
+    Requires ``INSTAGRAM_ACCESS_TOKEN`` (long-lived) and ``INSTAGRAM_USER_ID``
+    (Business or Creator account, NOT a personal account). The flow is
+    two-step: create a media container (``/{user_id}/media``), then publish
+    it (``/{user_id}/media_publish``).
+
+    Honest constraint: Instagram does **not** support text-only posts via the
+    API. Media is required. We refuse the call up front with a clear message
+    rather than silently degrade.
+    """
+
+    name: str = "instagram"
+    max_chars: int = 2_200  # caption limit
+
+    def publish(
+        self,
+        *,
+        text: str,
+        media_paths: list[str],
+        account_handle: str,
+    ) -> PublishResult:
+        if not media_paths:
+            raise SocialAdapterError(
+                "instagram requires media (image/video); text-only posts "
+                "are not supported by the Instagram Graph API"
+            )
+        if len(media_paths) > 1:
+            raise SocialAdapterError(
+                "instagram adapter ships single-image posts only in this slice; "
+                "carousel (multi-image) arrives next"
+            )
+        token = os.environ.get("INSTAGRAM_ACCESS_TOKEN")
+        user_id = os.environ.get("INSTAGRAM_USER_ID")
+        if not token:
+            raise SocialAdapterError(
+                "instagram adapter needs INSTAGRAM_ACCESS_TOKEN in the environment"
+            )
+        if not user_id:
+            raise SocialAdapterError(
+                "instagram adapter needs INSTAGRAM_USER_ID "
+                "(Business or Creator account id, NOT a personal account)"
+            )
+        # Instagram needs a publicly-reachable image URL. A local file path is
+        # NOT what the API wants — refuse early instead of failing at the call.
+        media_ref = media_paths[0]
+        if not media_ref.startswith(("http://", "https://")):
+            raise SocialAdapterError(
+                "instagram media must be a public https URL the API can fetch; "
+                "upload to S3 / Cloudinary first and pass the URL"
+            )
+        try:
+            import httpx
+        except ImportError as e:
+            raise SocialAdapterError(
+                "instagram adapter needs httpx; install with `pip install httpx`"
+            ) from e
+
+        graph = "https://graph.facebook.com/v19.0"
+        try:
+            container = httpx.post(
+                f"{graph}/{user_id}/media",
+                data={
+                    "image_url": media_ref,
+                    "caption": text,
+                    "access_token": token,
+                },
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(f"instagram container request failed: {e}") from e
+        if container.status_code != 200:
+            raise SocialAdapterError(
+                f"instagram /media returned {container.status_code}: "
+                f"{container.text[:200]}"
+            )
+        container_id = str((container.json() or {}).get("id") or "")
+        if not container_id:
+            raise SocialAdapterError("instagram container response is missing id")
+
+        try:
+            publish = httpx.post(
+                f"{graph}/{user_id}/media_publish",
+                data={"creation_id": container_id, "access_token": token},
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(f"instagram publish request failed: {e}") from e
+        if publish.status_code != 200:
+            raise SocialAdapterError(
+                f"instagram /media_publish returned {publish.status_code}: "
+                f"{publish.text[:200]}"
+            )
+        post_id = str((publish.json() or {}).get("id") or "")
+        if not post_id:
+            raise SocialAdapterError("instagram publish response is missing id")
+        return PublishResult(
+            post_id=post_id,
+            permalink=f"https://www.instagram.com/p/{post_id}/",
+            cost_usd=0.0,
+            raw_status="instagram_ok",
+        )
+
+
 # Register the stub adapter unconditionally so tests can exercise the full
 # plan→approval→execute flow without external credentials. The real adapters
 # are registered separately by the runtime when it boots — see runtime.py.
@@ -397,5 +658,7 @@ def register_default_adapters() -> None:
     """
     register_adapter(XTwitterAdapter())
     register_adapter(LinkedInAdapter())
+    register_adapter(RedditAdapter())
+    register_adapter(InstagramAdapter())
 
 
