@@ -45,6 +45,7 @@ from .tools.code_complex import plan_code_complex
 from .tools.data_io import csv_read, json_read, plan_csv_write, plan_json_write
 from .tools.email_deliverability import check_deliverability
 from .tools.email_inbox import read_inbox
+from .tools.email_send import plan_email_send
 from .tools.fs import fs_list, fs_read, plan_fs_write
 from .tools.fsguard import FsGuard
 from .tools.http import as_tool_payload as _http_payload
@@ -256,6 +257,21 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # email.send — APPROVE-tier SMTP send. Closes the outreach loop.
+    ts.register(
+        Tool(
+            name="email.send",
+            action="send_email",
+            fn=lambda to, subject, body, cc=None, bcc=None: _as_dict(
+                plan_email_send(
+                    to=to, subject=subject, body=body, cc=cc, bcc=bcc,
+                )
+            ),
+            output_taint=Taint.TRUSTED,
+            has_egress=True,
+        )
+    )
+
     # email.deliverability_check — AUTO-tier DNS read. No auth, no mutation.
     ts.register(
         Tool(

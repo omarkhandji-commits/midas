@@ -27,6 +27,54 @@ def execute_approved_step(runtime: Any, request: ApprovalRequest) -> dict[str, A
     return handler(runtime, request)
 
 
+def _execute_email_send(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    """Post-approval SMTP send. Failure recorded as DENY."""
+    from .tools.email_send import SmtpSendError, execute_email_send
+
+    payload = request.payload or {}
+    try:
+        result = execute_email_send(payload)
+    except SmtpSendError as e:
+        runtime.append_receipt(
+            run_id=request.run_id,
+            agent="execute",
+            tool="email.send.failed",
+            inputs={
+                "approval_id": request.id,
+                "n_recipients": len(payload.get("to") or [])
+                + len(payload.get("cc") or [])
+                + len(payload.get("bcc") or []),
+            },
+            outputs={"error": str(e)},
+            decision=Decision.DENY,
+            taint_out=Taint.UNTRUSTED,
+        )
+        raise
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool="email.send.executed",
+        inputs={
+            "approval_id": request.id,
+            "n_recipients": len(payload.get("to") or [])
+            + len(payload.get("cc") or [])
+            + len(payload.get("bcc") or []),
+        },
+        outputs={
+            "message_id": result.message_id,
+            "recipients_accepted": result.recipients_accepted,
+            "raw_status": result.raw_status,
+        },
+        decision=Decision.ALLOW,
+        taint_out=Taint.TRUSTED,
+    )
+    return {
+        "message_id": result.message_id,
+        "recipients_accepted": result.recipients_accepted,
+        "raw_status": result.raw_status,
+    }
+
+
 def _execute_web_automate(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     """Post-approval web.automate run. Failure recorded as DENY."""
     from .tools.web_automate import AutomateError, execute_web_automate
@@ -491,4 +539,5 @@ _HANDLERS = {
     "stripe.payment_link": _execute_stripe_payment_link,
     "code.complex": _execute_code_complex,
     "web.automate": _execute_web_automate,
+    "email.send": _execute_email_send,
 }

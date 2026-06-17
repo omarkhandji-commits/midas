@@ -7,6 +7,18 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`email.send` tool — APPROVE-tier SMTP send (STARTTLS / SSL).**
+  Closes the outreach loop: ``email.draft`` writes the ``.eml``,
+  ``email.send`` actually puts it on the wire. Plan validates
+  recipients (RFC-2822 syntax), subject, body (50k cap), 100-recipient
+  ceiling. Payload carries the canonical message + sha256_intent;
+  executor refuses on drift. Honest constraints baked in: (1) bulk
+  (>1 recipient) without an unsubscribe affordance is REFUSED at plan
+  time — CAN-SPAM / CASL / GDPR all require it; (2) plaintext SMTP
+  (port 25) is refused at execute time — STARTTLS (587) or SSL (465)
+  only; (3) ``SMTP_HOST`` / ``SMTP_USER`` / ``SMTP_PASSWORD`` /
+  ``SMTP_FROM`` read at execute time only. Action: ``send_email``
+  (already APPROVE in default policy). Failed send writes DENY receipt.
 - **`email.deliverability_check` tool — honest SPF/DKIM/DMARC posture.**
   AUTO-tier DNS-only check: queries the domain's TXT records, parses
   SPF (with ``-all`` / ``~all`` / redirect detection), probes DKIM at
