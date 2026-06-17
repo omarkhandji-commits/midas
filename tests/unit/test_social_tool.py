@@ -15,12 +15,14 @@ import pytest
 
 from midas.flagship.agent.tools.fsguard import FsGuard
 from midas.flagship.agent.tools.social import (
+    FacebookAdapter,
     InstagramAdapter,
     LinkedInAdapter,
     PublishResult,
     RedditAdapter,
     SocialAdapterError,
     StubSocialAdapter,
+    ThreadsAdapter,
     XTwitterAdapter,
     _hash_intent,
     execute_social_publish,
@@ -274,3 +276,57 @@ def test_instagram_without_credentials_raises(monkeypatch: pytest.MonkeyPatch) -
         adapter.publish(
             text="cap", media_paths=["https://x.com/a.png"], account_handle="@brand"
         )
+
+
+# ── Facebook ──────────────────────────────────────────────────────────────
+
+
+def test_facebook_without_page_token_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FACEBOOK_PAGE_TOKEN", raising=False)
+    monkeypatch.delenv("FACEBOOK_PAGE_ID", raising=False)
+    adapter = FacebookAdapter()
+    with pytest.raises(SocialAdapterError, match="FACEBOOK_PAGE_TOKEN"):
+        adapter.publish(text="hi", media_paths=[], account_handle="MyPage")
+
+
+def test_facebook_without_page_id_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FACEBOOK_PAGE_TOKEN", "fake")
+    monkeypatch.delenv("FACEBOOK_PAGE_ID", raising=False)
+    adapter = FacebookAdapter()
+    with pytest.raises(SocialAdapterError, match="FACEBOOK_PAGE_ID"):
+        adapter.publish(text="hi", media_paths=[], account_handle="MyPage")
+
+
+def test_facebook_refuses_media_in_this_slice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FACEBOOK_PAGE_TOKEN", "fake")
+    monkeypatch.setenv("FACEBOOK_PAGE_ID", "12345")
+    adapter = FacebookAdapter()
+    with pytest.raises(SocialAdapterError, match="text only"):
+        adapter.publish(text="hi", media_paths=["x.png"], account_handle="MyPage")
+
+
+# ── Threads ───────────────────────────────────────────────────────────────
+
+
+def test_threads_without_token_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("THREADS_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("THREADS_USER_ID", raising=False)
+    adapter = ThreadsAdapter()
+    with pytest.raises(SocialAdapterError, match="THREADS_ACCESS_TOKEN"):
+        adapter.publish(text="hi", media_paths=[], account_handle="@me")
+
+
+def test_threads_without_user_id_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("THREADS_ACCESS_TOKEN", "fake")
+    monkeypatch.delenv("THREADS_USER_ID", raising=False)
+    adapter = ThreadsAdapter()
+    with pytest.raises(SocialAdapterError, match="THREADS_USER_ID"):
+        adapter.publish(text="hi", media_paths=[], account_handle="@me")
+
+
+def test_threads_refuses_media_in_this_slice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("THREADS_ACCESS_TOKEN", "fake")
+    monkeypatch.setenv("THREADS_USER_ID", "555")
+    adapter = ThreadsAdapter()
+    with pytest.raises(SocialAdapterError, match="text only"):
+        adapter.publish(text="hi", media_paths=["x.png"], account_handle="@me")

@@ -7,6 +7,14 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Facebook + Threads social adapters.** ``FacebookAdapter`` posts text
+  updates to a Page feed via Meta Graph (``FACEBOOK_PAGE_TOKEN`` +
+  ``FACEBOOK_PAGE_ID``; personal profiles are no longer supported by Meta's
+  API so we refuse early). ``ThreadsAdapter`` posts text via the Meta
+  Threads API's two-step container+publish flow (``THREADS_ACCESS_TOKEN`` +
+  ``THREADS_USER_ID``), with 500-char limit. Media attachments queued for
+  the next slice; both refuse media calls with a clean message rather than
+  silent degrade.
 - **Reddit social adapter (`RedditAdapter`).** Posts self-text submissions
   via Reddit's API ``/api/submit``. Requires a script-type OAuth app and
   four env vars: ``REDDIT_CLIENT_ID``, ``REDDIT_CLIENT_SECRET``,

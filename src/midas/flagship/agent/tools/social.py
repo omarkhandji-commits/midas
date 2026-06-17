@@ -643,6 +643,167 @@ class InstagramAdapter:
         )
 
 
+# ── Facebook adapter (Pages, opt-in) ─────────────────────────────────────────
+
+
+@dataclass
+class FacebookAdapter:
+    """Posts a text update to a Facebook Page via the Meta Graph API.
+
+    Requires ``FACEBOOK_PAGE_TOKEN`` (Page access token, not user token) and
+    ``FACEBOOK_PAGE_ID``. Posting to a personal profile is no longer supported
+    by Meta's API since 2018; this adapter is Pages-only. We refuse early
+    rather than letting Meta return a confusing permission error.
+    """
+
+    name: str = "facebook"
+    max_chars: int = 63_206  # Facebook's stated limit
+
+    def publish(
+        self,
+        *,
+        text: str,
+        media_paths: list[str],
+        account_handle: str,
+    ) -> PublishResult:
+        if media_paths:
+            raise SocialAdapterError(
+                "facebook adapter posts text only in this slice; "
+                "photo + link posts arrive next"
+            )
+        token = os.environ.get("FACEBOOK_PAGE_TOKEN")
+        page_id = os.environ.get("FACEBOOK_PAGE_ID")
+        if not token:
+            raise SocialAdapterError(
+                "facebook adapter needs FACEBOOK_PAGE_TOKEN "
+                "(a Page access token, NOT a user token)"
+            )
+        if not page_id:
+            raise SocialAdapterError(
+                "facebook adapter needs FACEBOOK_PAGE_ID"
+            )
+        try:
+            import httpx
+        except ImportError as e:
+            raise SocialAdapterError(
+                "facebook adapter needs httpx; install with `pip install httpx`"
+            ) from e
+
+        try:
+            resp = httpx.post(
+                f"https://graph.facebook.com/v19.0/{page_id}/feed",
+                data={"message": text, "access_token": token},
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(f"facebook publish request failed: {e}") from e
+        if resp.status_code != 200:
+            raise SocialAdapterError(
+                f"facebook /feed returned {resp.status_code}: "
+                f"{resp.text[:200]}"
+            )
+        post_id = str((resp.json() or {}).get("id") or "")
+        if not post_id:
+            raise SocialAdapterError("facebook publish response is missing id")
+        # Page post ids are <page_id>_<post_id>; permalink works either way.
+        return PublishResult(
+            post_id=post_id,
+            permalink=f"https://www.facebook.com/{post_id}",
+            cost_usd=0.0,
+            raw_status="facebook_ok",
+        )
+
+
+# ── Threads adapter (Meta's text-first network, opt-in) ──────────────────────
+
+
+@dataclass
+class ThreadsAdapter:
+    """Posts a text update to Threads via the Meta Threads API.
+
+    Requires ``THREADS_ACCESS_TOKEN`` and ``THREADS_USER_ID``. The flow
+    mirrors Instagram's: create a media container, then publish. Threads
+    text posts use ``media_type=TEXT`` (no media required, unlike Instagram).
+    """
+
+    name: str = "threads"
+    max_chars: int = 500  # Threads' character limit
+
+    def publish(
+        self,
+        *,
+        text: str,
+        media_paths: list[str],
+        account_handle: str,
+    ) -> PublishResult:
+        if media_paths:
+            raise SocialAdapterError(
+                "threads adapter posts text only in this slice; "
+                "image attachments arrive next"
+            )
+        token = os.environ.get("THREADS_ACCESS_TOKEN")
+        user_id = os.environ.get("THREADS_USER_ID")
+        if not token:
+            raise SocialAdapterError(
+                "threads adapter needs THREADS_ACCESS_TOKEN in the environment"
+            )
+        if not user_id:
+            raise SocialAdapterError(
+                "threads adapter needs THREADS_USER_ID"
+            )
+        try:
+            import httpx
+        except ImportError as e:
+            raise SocialAdapterError(
+                "threads adapter needs httpx; install with `pip install httpx`"
+            ) from e
+
+        graph = "https://graph.threads.net/v1.0"
+        try:
+            container = httpx.post(
+                f"{graph}/{user_id}/threads",
+                data={
+                    "media_type": "TEXT",
+                    "text": text,
+                    "access_token": token,
+                },
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(f"threads container request failed: {e}") from e
+        if container.status_code != 200:
+            raise SocialAdapterError(
+                f"threads /threads returned {container.status_code}: "
+                f"{container.text[:200]}"
+            )
+        container_id = str((container.json() or {}).get("id") or "")
+        if not container_id:
+            raise SocialAdapterError("threads container response is missing id")
+
+        try:
+            publish = httpx.post(
+                f"{graph}/{user_id}/threads_publish",
+                data={"creation_id": container_id, "access_token": token},
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(f"threads publish request failed: {e}") from e
+        if publish.status_code != 200:
+            raise SocialAdapterError(
+                f"threads /threads_publish returned {publish.status_code}: "
+                f"{publish.text[:200]}"
+            )
+        post_id = str((publish.json() or {}).get("id") or "")
+        if not post_id:
+            raise SocialAdapterError("threads publish response is missing id")
+        return PublishResult(
+            post_id=post_id,
+            permalink=f"https://www.threads.net/@{account_handle.lstrip('@')}/post/{post_id}",
+            cost_usd=0.0,
+            raw_status="threads_ok",
+        )
+
+
 # Register the stub adapter unconditionally so tests can exercise the full
 # plan→approval→execute flow without external credentials. The real adapters
 # are registered separately by the runtime when it boots — see runtime.py.
@@ -660,5 +821,7 @@ def register_default_adapters() -> None:
     register_adapter(LinkedInAdapter())
     register_adapter(RedditAdapter())
     register_adapter(InstagramAdapter())
+    register_adapter(FacebookAdapter())
+    register_adapter(ThreadsAdapter())
 
 
