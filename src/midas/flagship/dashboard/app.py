@@ -1811,6 +1811,51 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         )
         return _json(200, {"ok": True})
 
+    @app.post("/api/webhooks/stripe")
+    async def api_webhooks_stripe(request: Request) -> Response:
+        """Stripe webhook receiver — verifies HMAC, auto-records cash.
+
+        This is the ONE unauthenticated endpoint in the dashboard. Stripe calls
+        it from the public internet (after the operator exposes loopback via
+        ngrok/cloudflared). We always return 200 on verified events to avoid
+        noisy Stripe retries; signature failures get 400. Body parsing happens
+        only AFTER the signature is verified.
+        """
+        import os
+
+        from midas.flagship.stripe_webhook import (
+            StripeWebhookError,
+            parse_event,
+            record_cash_from_event,
+            verify_signature,
+        )
+
+        secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+        signature = request.headers.get("stripe-signature", "")
+        body = await request.body()
+        try:
+            verify_signature(payload=body, signature_header=signature, secret=secret)
+        except StripeWebhookError as e:
+            # Signature failure is the ONE case where we want a non-2xx — it
+            # tells Stripe (and operations) that something is wrong upstream.
+            return _json(400, {"error": str(e)})
+        try:
+            event = parse_event(body)
+        except StripeWebhookError as e:
+            # Parsed body is malformed → still 400 (the operator's config sent
+            # garbage; we don't want infinite retries on it).
+            return _json(400, {"error": str(e)})
+        recorded = record_cash_from_event(deps.memory, event)
+        return _json(
+            200,
+            {
+                "ok": True,
+                "event_id": event.id,
+                "event_type": event.type,
+                "recorded": recorded,
+            },
+        )
+
     @app.get("/api/outcomes/history")
     def api_outcomes_history(request: Request, move_key: str = "") -> Response:
         _require_session(request)

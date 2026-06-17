@@ -7,6 +7,17 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Stripe webhook receiver (`POST /api/webhooks/stripe`).** Closes the
+  auto-attribution loop: when a payment succeeds, Stripe POSTs an event;
+  MIDAS verifies the HMAC-SHA256 signature with constant-time compare,
+  rejects events outside a 5-minute tolerance window (Stripe's recommended
+  replay defense), parses the event, and writes a ``MemoryKind.CASH`` entry
+  with the Stripe dashboard URL as a source. Idempotent on ``event.id`` —
+  duplicate webhook replays are no-ops. The ONE unauthenticated endpoint in
+  the dashboard, bound to loopback by design; the operator tunnels via
+  ngrok/cloudflared to expose it. Atomic secret rotation (multiple ``v1=``
+  sigs in one header) supported. Honest constraint: body parsing happens
+  ONLY after the signature is verified.
 - **Stripe payment link tool (`stripe.payment_link`).** Closes the cash loop —
   before this tool, the agent could draft a quote/proposal/invoice but had no
   way to collect the cash without manual operator work. The planner validates
