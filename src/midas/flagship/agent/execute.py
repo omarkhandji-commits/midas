@@ -27,6 +27,48 @@ def execute_approved_step(runtime: Any, request: ApprovalRequest) -> dict[str, A
     return handler(runtime, request)
 
 
+def _execute_web_automate(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    """Post-approval web.automate run. Failure recorded as DENY."""
+    from .tools.web_automate import AutomateError, execute_web_automate
+
+    payload = request.payload or {}
+    try:
+        result = execute_web_automate(payload)
+    except AutomateError as e:
+        runtime.append_receipt(
+            run_id=request.run_id,
+            agent="execute",
+            tool="web.automate.failed",
+            inputs={"approval_id": request.id, "start_url": payload.get("start_url")},
+            outputs={"error": str(e)},
+            decision=Decision.DENY,
+            taint_out=Taint.UNTRUSTED,
+        )
+        raise
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool="web.automate.executed",
+        inputs={"approval_id": request.id, "start_url": payload.get("start_url")},
+        outputs={
+            "final_url": result.final_url,
+            "actions_run": result.actions_run,
+            "duration_seconds": result.elapsed_seconds,
+            "captcha_detected": result.captcha_detected,
+        },
+        decision=Decision.ALLOW,
+        taint_out=Taint.UNTRUSTED,
+    )
+    return {
+        "final_url": result.final_url,
+        "title": result.title,
+        "html": result.html,
+        "captcha_detected": result.captcha_detected,
+        "actions_run": result.actions_run,
+        "truncated": result.truncated,
+    }
+
+
 def _execute_code_complex(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     """Post-approval Claude Code delegation. Failure is recorded as DENY."""
     from .tools.code_complex import CodeComplexError, execute_code_complex
@@ -448,4 +490,5 @@ _HANDLERS = {
     "social.publish": _execute_social_publish,
     "stripe.payment_link": _execute_stripe_payment_link,
     "code.complex": _execute_code_complex,
+    "web.automate": _execute_web_automate,
 }

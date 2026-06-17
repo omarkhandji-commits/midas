@@ -54,6 +54,7 @@ from .tools.skill import skill_index, skill_load
 from .tools.social import plan_social_publish
 from .tools.stripe_pay import plan_payment_link
 from .tools.voice_synth import plan_voice_synth
+from .tools.web_automate import plan_web_automate
 from .tools.web_scrape import _as_tool_payload as _scrape_payload
 from .tools.web_scrape import web_scrape
 
@@ -253,6 +254,25 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # web.automate — APPROVE-tier interactive automation. Egress at execute time.
+    ts.register(
+        Tool(
+            name="web.automate",
+            action="execute_code",
+            fn=lambda start_url, actions, timeout_seconds=60.0,
+            allow_disallowed_robots=False: _as_dict(
+                plan_web_automate(
+                    start_url=start_url,
+                    actions=actions,
+                    timeout_seconds=float(timeout_seconds),
+                    allow_disallowed_robots=bool(allow_disallowed_robots),
+                )
+            ),
+            output_taint=Taint.UNTRUSTED,
+            has_egress=True,
+        )
+    )
+
     # web.scrape — render-aware fetch (Playwright). AUTO-tier read with egress.
     # Output is UNTRUSTED (page content is data, never instructions). Robots.txt
     # is respected by default; the captcha detector triggers a clean stop.

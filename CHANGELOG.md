@@ -7,6 +7,19 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`web.automate` tool — APPROVE-tier interactive web automation.**
+  Sibling to ``web.scrape``: where scrape is a read-only render,
+  automate performs a small declared sequence of actions
+  (``navigate``/``click``/``fill``/``wait``/``screenshot``). NO
+  ``evaluate`` step — arbitrary JS would let the planner exfiltrate
+  session data. Sequence capped at 20 actions. Action: ``execute_code``
+  (APPROVE). Payload carries the canonical JSON + a sha256; executor
+  refuses on drift. Honest constraints baked in: (1) ``fill`` selectors
+  that look password-shaped (``password``, ``pwd``, ``secret``, ``pin``,
+  ``otp``) are REFUSED at plan time — credentials belong in a vault, not
+  in an approval payload; (2) robots.txt respected at navigate, override
+  per-call; (3) per-host rate limit shared with ``web.scrape``;
+  (4) captcha detection triggers a clean stop, never a bypass.
 - **Persona presets (`GET /api/personas`).** Five opinionated starter
   profiles to make the new-user wizard concrete instead of overwhelming:
   Freelance developer, Independent consultant, Content creator,
