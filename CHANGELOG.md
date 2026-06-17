@@ -7,6 +7,16 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`email.deliverability_check` tool — honest SPF/DKIM/DMARC posture.**
+  AUTO-tier DNS-only check: queries the domain's TXT records, parses
+  SPF (with ``-all`` / ``~all`` / redirect detection), probes DKIM at
+  10 common selectors (override via ``dkim_selectors``), parses DMARC
+  (policy + ``rua`` + ``pct``). Returns a heuristic 0–100 score and a
+  concrete fix list. Honest: the score is a proxy, not a guarantee —
+  real deliverability also depends on content, warmup, reputation; the
+  receipt's ``proof_level=MEDIUM`` cites the actual DNS records, never
+  fabricated. dnspython is an optional dep; missing it surfaces a clear
+  install message.
 - **`email.inbox.read` tool — surfaces inbound leads without state change.**
   AUTO-tier IMAP fetch that reads up to N recent (unread) messages and
   returns structured rows (from address + name, subject, snippet,

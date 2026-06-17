@@ -43,6 +43,7 @@ from .tools.cash import (
 from .tools.code import plan_code_run
 from .tools.code_complex import plan_code_complex
 from .tools.data_io import csv_read, json_read, plan_csv_write, plan_json_write
+from .tools.email_deliverability import check_deliverability
 from .tools.email_inbox import read_inbox
 from .tools.fs import fs_list, fs_read, plan_fs_write
 from .tools.fsguard import FsGuard
@@ -255,6 +256,19 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # email.deliverability_check — AUTO-tier DNS read. No auth, no mutation.
+    ts.register(
+        Tool(
+            name="email.deliverability_check",
+            action="read_local_files",
+            fn=lambda domain, dkim_selectors=None: check_deliverability(
+                domain, dkim_selectors=dkim_selectors,
+            ).as_dict(),
+            output_taint=Taint.TRUSTED,
+            has_egress=True,
+        )
+    )
+
     # email.inbox.read — AUTO-tier IMAP fetch. Read-only (readonly=True at
     # SELECT), refuses plaintext port 143, surfaces lead signals only.
     ts.register(
