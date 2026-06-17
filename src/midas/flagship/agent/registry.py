@@ -49,6 +49,7 @@ from .tools.http import http_fetch
 from .tools.image import plan_image
 from .tools.pdf import pdf_extract
 from .tools.sheet import plan_sheet_write, sheet_read
+from .tools.social import plan_social_publish
 
 
 def build_default_toolset(
@@ -366,6 +367,27 @@ def build_default_toolset(
                 plan_adcopy(guard, path, product=product, audience=audience, variants=variants)
             ),
             output_taint=Taint.TRUSTED,
+        )
+    )
+
+    # social.publish — approval-gated, egress at execute time only.
+    # Action ``publish_public`` is in the default policy's requires_approval set.
+    # Output is UNTRUSTED: the platform's API response is data, not instructions.
+    ts.register(
+        Tool(
+            name="social.publish",
+            action="publish_public",
+            fn=lambda platform, text, account_handle, media_paths=None: _as_dict(
+                plan_social_publish(
+                    guard,
+                    platform=platform,
+                    text=text,
+                    account_handle=account_handle,
+                    media_paths=media_paths,
+                )
+            ),
+            output_taint=Taint.UNTRUSTED,
+            has_egress=True,
         )
     )
 

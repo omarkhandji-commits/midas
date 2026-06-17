@@ -27,6 +27,64 @@ def execute_approved_step(runtime: Any, request: ApprovalRequest) -> dict[str, A
     return handler(runtime, request)
 
 
+def _execute_social_publish(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    """Post-approval social publish — calls the platform adapter and records
+    a receipt tagged with ``platform`` + ``post_id`` so per-post ROI can join.
+
+    A publish failure is recorded as a DENY receipt with the error class — the
+    operator sees in the chain that the attempt happened, the bytes were never
+    silently dropped.
+    """
+    from .tools.social import SocialAdapterError, execute_social_publish
+
+    payload = request.payload or {}
+    platform = str(payload.get("platform") or "")
+    handle = str(payload.get("account_handle") or "")
+    try:
+        result = execute_social_publish(payload)
+    except SocialAdapterError as e:
+        runtime.append_receipt(
+            run_id=request.run_id,
+            agent="execute",
+            tool="social.publish.failed",
+            inputs={
+                "approval_id": request.id,
+                "platform": platform,
+                "account_handle": handle,
+            },
+            outputs={"error": str(e)},
+            decision=Decision.DENY,
+            taint_out=Taint.UNTRUSTED,
+        )
+        raise
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool="social.publish.executed",
+        inputs={
+            "approval_id": request.id,
+            "platform": platform,
+            "account_handle": handle,
+        },
+        outputs={
+            "platform": platform,
+            "post_id": result.post_id,
+            "account_handle": handle,
+            "permalink": result.permalink,
+            "raw_status": result.raw_status,
+        },
+        decision=Decision.ALLOW,
+        cost_usd=float(result.cost_usd),
+        taint_out=Taint.UNTRUSTED,
+    )
+    return {
+        "platform": platform,
+        "post_id": result.post_id,
+        "permalink": result.permalink,
+        "cost_usd": float(result.cost_usd),
+    }
+
+
 # ── concrete handlers ────────────────────────────────────────────────────────
 
 
@@ -301,4 +359,5 @@ _HANDLERS = {
     "quote.draft": _cash_handler,
     "adcopy.draft": _cash_handler,
     "image.draft": _cash_handler,
+    "social.publish": _execute_social_publish,
 }

@@ -7,6 +7,21 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Social publish tool (`social.publish`).** Approval-gated, adapter-based.
+  The planner validates platform / handle / text and resolves media paths
+  through ``FsGuard`` — no credential read, no egress at plan time. The
+  approval payload carries the canonical text + a ``sha256_intent`` of
+  ``platform|handle|text|media``; the executor refuses to publish if that
+  hash drifts between approval and execute (defense against payload tampering).
+  Two adapters ship: ``StubSocialAdapter`` (no egress, deterministic
+  ``post_id`` from sha256, for tests + dry-runs) and ``XTwitterAdapter``
+  (opt-in, requires ``X_BEARER_TOKEN`` / ``TWITTER_BEARER_TOKEN``, calls X
+  API v2). The executed receipt is tagged with ``platform`` + ``post_id``
+  so ``compute_post_roi`` can join cost to revenue. Output is
+  ``Taint.UNTRUSTED`` (third-party API response is data, not instructions).
+  A failed publish writes a ``DENY`` receipt — failures are visible in the
+  chain, never silently dropped. Adapters for LinkedIn / Instagram / YouTube
+  drop into ``_ADAPTERS`` without API changes.
 - **Image draft tool (`image.draft`).** Provider-agnostic, approval-gated. The
   planner produces PNG bytes at plan time and stores them base64-encoded in the
   approval payload, so the reviewer sees the exact sha256 before any write hits

@@ -2008,6 +2008,7 @@ _CAPABILITY_GROUPS: dict[str, str] = {
     "invoice.": "Cash artifacts",
     "voice.": "Cash artifacts",
     "image.": "Cash artifacts",
+    "social.": "Social",
     "research.": "Research",
     "http.": "Research",
     "mcp.": "External tools (MCP)",
