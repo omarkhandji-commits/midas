@@ -650,6 +650,19 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
             )
         return _json(200, {"tools": items})
 
+    @app.get("/api/personas")
+    def api_personas(request: Request) -> Response:
+        """Return the persona presets that pre-configure the new-user wizard.
+
+        Pure data, no secrets, no egress — safe to cache client-side.
+        """
+        _require_session(request)
+        from midas.flagship.personas import list_personas, persona_as_dict
+
+        return _json(
+            200, {"personas": [persona_as_dict(p) for p in list_personas()]}
+        )
+
     @app.get("/api/onboard/state")
     def api_onboard_state(request: Request) -> Response:
         """One-shot snapshot for the wizard: provider ready, channel ready, first action done.

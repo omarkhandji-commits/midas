@@ -7,6 +7,13 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Persona presets (`GET /api/personas`).** Five opinionated starter
+  profiles to make the new-user wizard concrete instead of overwhelming:
+  Freelance developer, Independent consultant, Content creator,
+  E-commerce / Etsy seller, Local business. Each carries a tagline, a
+  ready-to-paste first action, a small set of recommended skills (from
+  ``seed_skills/``), and the operator's default currency. Pure data
+  module — no secrets, no egress.
 - **Voice synthesis tool (`voice.synthesize`).** Provider-agnostic TTS,
   sibling pattern to ``image.draft``: planner generates audio bytes,
   stores base64 in the approval payload with sha256; executor writes
