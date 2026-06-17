@@ -86,7 +86,7 @@ class SocialPublishPlan:
 
 _SUPPORTED_PLATFORMS = {
     "x", "twitter", "linkedin", "instagram", "facebook",
-    "threads", "youtube", "reddit",
+    "threads", "youtube", "reddit", "tiktok",
 }
 
 
@@ -804,6 +804,204 @@ class ThreadsAdapter:
         )
 
 
+# ── YouTube adapter (Community posts — opt-in) ───────────────────────────────
+
+
+@dataclass
+class YouTubeAdapter:
+    """Posts a Community tab update via the YouTube Data API v3.
+
+    YouTube's video upload flow is resumable + multi-part and depends on an
+    actual video file. That ships next. THIS adapter handles the
+    text/image-only Community posts (eligible channels: 500+ subscribers as
+    of late 2025), which are a real cash-relevant surface: announcements,
+    polls, product links.
+
+    Requires ``YOUTUBE_OAUTH_TOKEN`` (OAuth 2.0 with ``youtube`` scope) and
+    ``YOUTUBE_CHANNEL_ID``. The token MUST be a user OAuth token, NOT an
+    API key — Community posts are a write operation, scoped to the owning
+    account.
+    """
+
+    name: str = "youtube"
+    max_chars: int = 1_000  # YouTube Community post limit
+
+    def publish(
+        self,
+        *,
+        text: str,
+        media_paths: list[str],
+        account_handle: str,
+    ) -> PublishResult:
+        if media_paths:
+            raise SocialAdapterError(
+                "youtube adapter posts Community-tab text in this slice; "
+                "video upload (resumable, multi-part) arrives next"
+            )
+        token = os.environ.get("YOUTUBE_OAUTH_TOKEN")
+        channel_id = os.environ.get("YOUTUBE_CHANNEL_ID")
+        if not token:
+            raise SocialAdapterError(
+                "youtube adapter needs YOUTUBE_OAUTH_TOKEN "
+                "(user OAuth token with 'youtube' scope, NOT an API key)"
+            )
+        if not channel_id:
+            raise SocialAdapterError(
+                "youtube adapter needs YOUTUBE_CHANNEL_ID"
+            )
+        try:
+            import httpx
+        except ImportError as e:
+            raise SocialAdapterError(
+                "youtube adapter needs httpx; install with `pip install httpx`"
+            ) from e
+
+        # The Community Posts endpoint is part of the YouTube Data API v3.
+        # Note: Google has historically rate-limited this for new channels —
+        # the API returns 403 with a clear message we surface as-is.
+        try:
+            resp = httpx.post(
+                "https://www.googleapis.com/youtube/v3/communityPosts",
+                params={"part": "snippet"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "snippet": {
+                        "channelId": channel_id,
+                        "content": {"text": text},
+                    },
+                },
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(f"youtube publish request failed: {e}") from e
+        if resp.status_code not in (200, 201):
+            raise SocialAdapterError(
+                f"youtube /communityPosts returned {resp.status_code}: "
+                f"{resp.text[:200]}"
+            )
+        post_id = str((resp.json() or {}).get("id") or "")
+        if not post_id:
+            raise SocialAdapterError("youtube response is missing post id")
+        return PublishResult(
+            post_id=post_id,
+            permalink=f"https://www.youtube.com/post/{post_id}",
+            cost_usd=0.0,
+            raw_status="youtube_ok",
+        )
+
+
+# ── TikTok adapter (Content Posting API — opt-in) ────────────────────────────
+
+
+@dataclass
+class TikTokAdapter:
+    """Posts a text-only photo carousel via TikTok's Content Posting API.
+
+    TikTok's API is video-first; text-only posts are not supported. The
+    Content Posting API v2 requires a published image or video. For text
+    drafts the agent should compose an image via ``image.draft`` first, then
+    publish the result here as a photo post.
+
+    Requires ``TIKTOK_ACCESS_TOKEN`` and ``TIKTOK_OPEN_ID``. The first call
+    initializes a publish session and uploads the media; the second polls
+    for completion. We ship the *initialize* step only in this slice — the
+    poll loop is a follow-up — and refuse the call if media isn't a
+    publicly-reachable URL the TikTok backend can fetch.
+    """
+
+    name: str = "tiktok"
+    max_chars: int = 2_200  # TikTok caption limit
+
+    def publish(
+        self,
+        *,
+        text: str,
+        media_paths: list[str],
+        account_handle: str,
+    ) -> PublishResult:
+        if not media_paths:
+            raise SocialAdapterError(
+                "tiktok requires media (image or video); text-only posts "
+                "are not supported by the TikTok Content Posting API"
+            )
+        if len(media_paths) > 1:
+            raise SocialAdapterError(
+                "tiktok adapter ships single-media posts only in this slice; "
+                "multi-photo carousel arrives next"
+            )
+        media_ref = media_paths[0]
+        if not media_ref.startswith(("http://", "https://")):
+            raise SocialAdapterError(
+                "tiktok media must be a public https URL the API can fetch; "
+                "upload to S3 / Cloudinary first and pass the URL"
+            )
+        token = os.environ.get("TIKTOK_ACCESS_TOKEN")
+        open_id = os.environ.get("TIKTOK_OPEN_ID")
+        if not token:
+            raise SocialAdapterError(
+                "tiktok adapter needs TIKTOK_ACCESS_TOKEN in the environment"
+            )
+        if not open_id:
+            raise SocialAdapterError(
+                "tiktok adapter needs TIKTOK_OPEN_ID"
+            )
+        try:
+            import httpx
+        except ImportError as e:
+            raise SocialAdapterError(
+                "tiktok adapter needs httpx; install with `pip install httpx`"
+            ) from e
+
+        # Initialize a photo post session.
+        try:
+            init = httpx.post(
+                "https://open.tiktokapis.com/v2/post/publish/content/init/",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "post_info": {
+                        "title": text[:90],
+                        "description": text,
+                        "privacy_level": "PUBLIC_TO_EVERYONE",
+                    },
+                    "source_info": {
+                        "source": "PULL_FROM_URL",
+                        "photo_cover_index": 0,
+                        "photo_images": [media_ref],
+                    },
+                    "post_mode": "DIRECT_POST",
+                    "media_type": "PHOTO",
+                },
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(f"tiktok init request failed: {e}") from e
+        if init.status_code != 200:
+            raise SocialAdapterError(
+                f"tiktok /publish/content/init returned {init.status_code}: "
+                f"{init.text[:200]}"
+            )
+        data = (init.json() or {}).get("data") or {}
+        publish_id = str(data.get("publish_id") or "")
+        if not publish_id:
+            raise SocialAdapterError("tiktok init response is missing publish_id")
+        # Honest: the TikTok backend ingests the URL asynchronously and the
+        # eventual post id only becomes available via /publish/status. The
+        # poll loop is the next slice — for now we return the publish_id and
+        # a stable permalink shape; the operator confirms in the TikTok app.
+        return PublishResult(
+            post_id=publish_id,
+            permalink=f"https://www.tiktok.com/@{account_handle.lstrip('@')}",
+            cost_usd=0.0,
+            raw_status="tiktok_pending",
+        )
+
+
 # Register the stub adapter unconditionally so tests can exercise the full
 # plan→approval→execute flow without external credentials. The real adapters
 # are registered separately by the runtime when it boots — see runtime.py.
@@ -823,5 +1021,7 @@ def register_default_adapters() -> None:
     register_adapter(InstagramAdapter())
     register_adapter(FacebookAdapter())
     register_adapter(ThreadsAdapter())
+    register_adapter(YouTubeAdapter())
+    register_adapter(TikTokAdapter())
 
 

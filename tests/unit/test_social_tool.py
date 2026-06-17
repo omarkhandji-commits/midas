@@ -23,7 +23,9 @@ from midas.flagship.agent.tools.social import (
     SocialAdapterError,
     StubSocialAdapter,
     ThreadsAdapter,
+    TikTokAdapter,
     XTwitterAdapter,
+    YouTubeAdapter,
     _hash_intent,
     execute_social_publish,
     plan_social_publish,
@@ -330,3 +332,67 @@ def test_threads_refuses_media_in_this_slice(monkeypatch: pytest.MonkeyPatch) ->
     adapter = ThreadsAdapter()
     with pytest.raises(SocialAdapterError, match="text only"):
         adapter.publish(text="hi", media_paths=["x.png"], account_handle="@me")
+
+
+# ── YouTube ───────────────────────────────────────────────────────────────
+
+
+def test_youtube_without_token_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("YOUTUBE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("YOUTUBE_CHANNEL_ID", raising=False)
+    adapter = YouTubeAdapter()
+    with pytest.raises(SocialAdapterError, match="YOUTUBE_OAUTH_TOKEN"):
+        adapter.publish(text="hi", media_paths=[], account_handle="MyChannel")
+
+
+def test_youtube_without_channel_id_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YOUTUBE_OAUTH_TOKEN", "fake")
+    monkeypatch.delenv("YOUTUBE_CHANNEL_ID", raising=False)
+    adapter = YouTubeAdapter()
+    with pytest.raises(SocialAdapterError, match="YOUTUBE_CHANNEL_ID"):
+        adapter.publish(text="hi", media_paths=[], account_handle="MyChannel")
+
+
+def test_youtube_refuses_video_upload_in_this_slice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YOUTUBE_OAUTH_TOKEN", "fake")
+    monkeypatch.setenv("YOUTUBE_CHANNEL_ID", "UCxxxx")
+    adapter = YouTubeAdapter()
+    with pytest.raises(SocialAdapterError, match="video upload"):
+        adapter.publish(text="hi", media_paths=["clip.mp4"], account_handle="MyChannel")
+
+
+# ── TikTok ────────────────────────────────────────────────────────────────
+
+
+def test_tiktok_refuses_text_only() -> None:
+    adapter = TikTokAdapter()
+    with pytest.raises(SocialAdapterError, match="requires media"):
+        adapter.publish(text="hi", media_paths=[], account_handle="@me")
+
+
+def test_tiktok_refuses_local_file_path() -> None:
+    adapter = TikTokAdapter()
+    with pytest.raises(SocialAdapterError, match="public https URL"):
+        adapter.publish(
+            text="cap", media_paths=["./local.png"], account_handle="@me"
+        )
+
+
+def test_tiktok_refuses_carousel_in_this_slice() -> None:
+    adapter = TikTokAdapter()
+    with pytest.raises(SocialAdapterError, match="single-media"):
+        adapter.publish(
+            text="cap",
+            media_paths=["https://x.com/a.png", "https://x.com/b.png"],
+            account_handle="@me",
+        )
+
+
+def test_tiktok_without_credentials_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TIKTOK_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("TIKTOK_OPEN_ID", raising=False)
+    adapter = TikTokAdapter()
+    with pytest.raises(SocialAdapterError, match="TIKTOK_ACCESS_TOKEN"):
+        adapter.publish(
+            text="cap", media_paths=["https://x.com/a.png"], account_handle="@me"
+        )

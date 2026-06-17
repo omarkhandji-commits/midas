@@ -7,6 +7,16 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **YouTube + TikTok social adapters.** ``YouTubeAdapter`` posts to the
+  Community tab via the YouTube Data API v3 (requires user OAuth token —
+  NOT an API key — and ``YOUTUBE_CHANNEL_ID``); refuses video upload in
+  this slice (resumable + multi-part flow ships next). ``TikTokAdapter``
+  initializes a photo post via the Content Posting API v2 (``DIRECT_POST``,
+  ``PULL_FROM_URL``); requires ``TIKTOK_ACCESS_TOKEN`` + ``TIKTOK_OPEN_ID``;
+  refuses text-only (TikTok is media-first by API design) and local file
+  paths (the platform pulls from a public URL). The asynchronous status
+  poll ships in a follow-up — for now we return the ``publish_id`` so the
+  receipt has a stable handle.
 - **Facebook + Threads social adapters.** ``FacebookAdapter`` posts text
   updates to a Page feed via Meta Graph (``FACEBOOK_PAGE_TOKEN`` +
   ``FACEBOOK_PAGE_ID``; personal profiles are no longer supported by Meta's
