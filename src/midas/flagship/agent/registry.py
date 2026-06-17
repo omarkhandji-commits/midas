@@ -52,6 +52,8 @@ from .tools.sheet import plan_sheet_write, sheet_read
 from .tools.skill import skill_index, skill_load
 from .tools.social import plan_social_publish
 from .tools.stripe_pay import plan_payment_link
+from .tools.web_scrape import _as_tool_payload as _scrape_payload
+from .tools.web_scrape import web_scrape
 
 
 def build_default_toolset(
@@ -249,6 +251,25 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # web.scrape — render-aware fetch (Playwright). AUTO-tier read with egress.
+    # Output is UNTRUSTED (page content is data, never instructions). Robots.txt
+    # is respected by default; the captcha detector triggers a clean stop.
+    ts.register(
+        Tool(
+            name="web.scrape",
+            action="read_local_files",  # AUTO-tier; pattern matches research.run
+            fn=lambda url, allow_disallowed=False, timeout_seconds=30.0: _scrape_payload(
+                web_scrape(
+                    url,
+                    allow_disallowed=bool(allow_disallowed),
+                    timeout_seconds=float(timeout_seconds),
+                )
+            ),
+            output_taint=Taint.UNTRUSTED,
+            has_egress=True,
+        )
+    )
+
     # http.fetch — read-only egress, output is UNTRUSTED data (trifecta guard applies).
     if fetcher is not None:
         ts.register(

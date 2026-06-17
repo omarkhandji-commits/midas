@@ -2056,6 +2056,7 @@ _CAPABILITY_GROUPS: dict[str, str] = {
     "social.": "Social",
     "stripe.": "Cash collection",
     "research.": "Research",
+    "web.": "Research",
     "http.": "Research",
     "mcp.": "External tools (MCP)",
     "code.": "Code",

@@ -7,6 +7,18 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`web.scrape` tool — rendered fetch with honest anti-bot defenses.**
+  Runs the page through a clean headless Chromium (Playwright) so the agent
+  sees what a human would on JS-rendered sites (Etsy, Reddit, Fiverr,
+  competitor blogs). ``http.fetch`` stays for static pages — ``web.scrape``
+  is for the rest. Respects ``robots.txt`` by default; override requires
+  ``allow_disallowed=True`` AND an explicit egress allowlist entry.
+  Per-host rate limit (2s minimum), user-agent rotation through a real
+  current-browser pool, viewport jitter, clean profile every call.
+  Captcha markers (reCAPTCHA / hCaptcha / Cloudflare challenge) trigger a
+  clean stop — never a bypass attempt. Output is ``Taint.UNTRUSTED`` and
+  capped at 200 000 chars. Playwright is an optional dep; the error surfaces
+  the install command when missing.
 - **Skill loader on-demand (`skill.index` + `skill.load`).** Claude Code's
   token-economy pattern, ported. The planner sees only the *index* by
   default (one line per skill: name + 1-sentence summary), and pulls a
