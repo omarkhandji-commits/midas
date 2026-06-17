@@ -15,6 +15,7 @@ import pytest
 
 from midas.flagship.agent.tools.fsguard import FsGuard
 from midas.flagship.agent.tools.social import (
+    LinkedInAdapter,
     PublishResult,
     SocialAdapterError,
     StubSocialAdapter,
@@ -161,3 +162,27 @@ def test_x_adapter_refuses_media_in_this_slice() -> None:
     adapter = XTwitterAdapter()
     with pytest.raises(SocialAdapterError, match="does not yet upload media"):
         adapter.publish(text="hi", media_paths=["x.png"], account_handle="@me")
+
+
+def test_linkedin_adapter_without_token_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LINKEDIN_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("LINKEDIN_AUTHOR_URN", raising=False)
+    adapter = LinkedInAdapter()
+    with pytest.raises(SocialAdapterError, match="LINKEDIN_ACCESS_TOKEN"):
+        adapter.publish(text="hi", media_paths=[], account_handle="me")
+
+
+def test_linkedin_adapter_without_author_urn_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LINKEDIN_ACCESS_TOKEN", "fake")
+    monkeypatch.delenv("LINKEDIN_AUTHOR_URN", raising=False)
+    adapter = LinkedInAdapter()
+    with pytest.raises(SocialAdapterError, match="LINKEDIN_AUTHOR_URN"):
+        adapter.publish(text="hi", media_paths=[], account_handle="me")
+
+
+def test_linkedin_adapter_refuses_media_in_this_slice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LINKEDIN_ACCESS_TOKEN", "fake")
+    monkeypatch.setenv("LINKEDIN_AUTHOR_URN", "urn:li:person:abc")
+    adapter = LinkedInAdapter()
+    with pytest.raises(SocialAdapterError, match="does not yet upload media"):
+        adapter.publish(text="hi", media_paths=["x.png"], account_handle="me")

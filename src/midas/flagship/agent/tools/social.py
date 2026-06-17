@@ -298,9 +298,93 @@ class XTwitterAdapter:
         )
 
 
+# ── LinkedIn adapter (opt-in, requires LINKEDIN_ACCESS_TOKEN + author URN) ───
+
+
+@dataclass
+class LinkedInAdapter:
+    """Posts a text UGC update via the LinkedIn REST API.
+
+    Requires ``LINKEDIN_ACCESS_TOKEN`` (OAuth 2.0 with ``w_member_social`` scope)
+    and a ``LINKEDIN_AUTHOR_URN`` (e.g. ``urn:li:person:xxxxxxxx``). LinkedIn
+    refuses posts without the author URN — we surface a clear error rather than
+    silently picking a default.
+    """
+
+    name: str = "linkedin"
+    max_chars: int = 3_000
+
+    def publish(
+        self,
+        *,
+        text: str,
+        media_paths: list[str],
+        account_handle: str,
+    ) -> PublishResult:
+        if media_paths:
+            raise SocialAdapterError(
+                "linkedin adapter does not yet upload media in this slice"
+            )
+        token = os.environ.get("LINKEDIN_ACCESS_TOKEN")
+        author = os.environ.get("LINKEDIN_AUTHOR_URN")
+        if not token:
+            raise SocialAdapterError(
+                "linkedin adapter needs LINKEDIN_ACCESS_TOKEN in the environment"
+            )
+        if not author:
+            raise SocialAdapterError(
+                "linkedin adapter needs LINKEDIN_AUTHOR_URN (e.g. urn:li:person:xxx)"
+            )
+        try:
+            import httpx
+        except ImportError as e:
+            raise SocialAdapterError(
+                "linkedin adapter needs httpx; install with `pip install httpx`"
+            ) from e
+
+        body = {
+            "author": author,
+            "lifecycleState": "PUBLISHED",
+            "specificContent": {
+                "com.linkedin.ugc.ShareContent": {
+                    "shareCommentary": {"text": text},
+                    "shareMediaCategory": "NONE",
+                }
+            },
+            "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
+        }
+        try:
+            resp = httpx.post(
+                "https://api.linkedin.com/v2/ugcPosts",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "X-Restli-Protocol-Version": "2.0.0",
+                },
+                json=body,
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(f"linkedin publish request failed: {e}") from e
+        if resp.status_code not in (200, 201):
+            raise SocialAdapterError(
+                f"linkedin publish returned {resp.status_code}: {resp.text[:200]}"
+            )
+        # LinkedIn returns the URN in the `x-restli-id` header or body `id`.
+        post_id = resp.headers.get("x-restli-id") or str((resp.json() or {}).get("id") or "")
+        if not post_id:
+            raise SocialAdapterError("linkedin publish response is missing post id")
+        return PublishResult(
+            post_id=post_id,
+            permalink=f"https://www.linkedin.com/feed/update/{post_id}/",
+            cost_usd=0.0,
+            raw_status="linkedin_ok",
+        )
+
+
 # Register the stub adapter unconditionally so tests can exercise the full
-# plan→approval→execute flow without external credentials. The X adapter is
-# registered separately by the runtime when it boots — see runtime.py.
+# plan→approval→execute flow without external credentials. The real adapters
+# are registered separately by the runtime when it boots — see runtime.py.
 register_adapter(StubSocialAdapter())
 
 
@@ -308,9 +392,10 @@ def register_default_adapters() -> None:
     """Called by the runtime to wire real platform adapters into the registry.
 
     Kept as a function (rather than auto-registering) so tests can choose
-    whether to swap in stubs. The XTwitterAdapter only egresses when its
-    ``publish`` is called — registering it does not trigger any network I/O.
+    whether to swap in stubs. Each adapter only egresses when its ``publish``
+    is called — registering it does not trigger any network I/O.
     """
     register_adapter(XTwitterAdapter())
+    register_adapter(LinkedInAdapter())
 
 
