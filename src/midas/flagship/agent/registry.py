@@ -49,6 +49,7 @@ from .tools.http import http_fetch
 from .tools.image import plan_image
 from .tools.pdf import pdf_extract
 from .tools.sheet import plan_sheet_write, sheet_read
+from .tools.skill import skill_index, skill_load
 from .tools.social import plan_social_publish
 from .tools.stripe_pay import plan_payment_link
 
@@ -63,6 +64,7 @@ def build_default_toolset(
     search: SearchAdapter | None = None,
     fetcher: Fetcher | None = None,
     verifier: SourceVerifier | None = None,
+    skill_registry: Any = None,
 ) -> Toolset:
     ts = Toolset(sentinel, ledger=ledger, approvals=approvals, run_id=run_id)
 
@@ -370,6 +372,38 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+
+    # Skill loader on-demand — the planner sees only the index by default and
+    # pulls a specific body when one matches. Both AUTO-tier (read_local_files).
+    if skill_registry is not None:
+        ts.register(
+            Tool(
+                name="skill.index",
+                action="read_local_files",
+                fn=lambda: {
+                    "skills": [
+                        {
+                            "name": e.name,
+                            "summary": e.summary,
+                            "permissions": e.permissions,
+                            "sha256": e.sha256,
+                        }
+                        for e in skill_index(skill_registry)
+                    ]
+                },
+                output_taint=Taint.TRUSTED,
+            )
+        )
+        ts.register(
+            Tool(
+                name="skill.load",
+                action="read_local_files",
+                fn=lambda name: _as_dict(skill_load(skill_registry, name)),
+                # SKILL.md bodies come from local disk written by the operator
+                # or installed-via-approval; treat as trusted for planning use.
+                output_taint=Taint.TRUSTED,
+            )
+        )
 
     # stripe.payment_link — closes the cash loop. Approval-gated, no egress at
     # plan time. STRIPE_API_KEY is only read at execute time.

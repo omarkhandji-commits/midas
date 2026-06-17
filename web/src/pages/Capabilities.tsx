@@ -21,6 +21,7 @@ const GROUP_ORDER = [
   "Social",
   "Files",
   "Code",
+  "Skills",
   "Research",
   "External tools (MCP)",
   "Other",

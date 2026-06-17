@@ -7,6 +7,20 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Skill loader on-demand (`skill.index` + `skill.load`).** Claude Code's
+  token-economy pattern, ported. The planner sees only the *index* by
+  default (one line per skill: name + 1-sentence summary), and pulls a
+  specific body via ``skill.load(name)`` only when one matches the task.
+  Body load is capped at 20 000 chars so a misconfigured skill can't blow
+  the context. Both tools are AUTO-tier (``read_local_files``) — they read
+  from the local skill registry, never egress, never run scripts. Installing
+  a skill remains its own approval-gated flow.
+- **Three seed cash-shaped skills** under
+  ``src/midas/flagship/seed_skills/`` so the loader has real content out of
+  the box: ``freelance-dev-sow`` (proposal + quote + 50% deposit Stripe link
+  + client email), ``newsletter-weekly`` (weekly issue draft + send),
+  ``etsy-listing`` (product + adcopy + SEO tags, with the honest constraint
+  that AI-generated images go in Digital Downloads, not Handmade).
 - **Stripe webhook receiver (`POST /api/webhooks/stripe`).** Closes the
   auto-attribution loop: when a payment succeeds, Stripe POSTs an event;
   MIDAS verifies the HMAC-SHA256 signature with constant-time compare,

@@ -2059,6 +2059,7 @@ _CAPABILITY_GROUPS: dict[str, str] = {
     "http.": "Research",
     "mcp.": "External tools (MCP)",
     "code.": "Code",
+    "skill.": "Skills",
 }
 
 
