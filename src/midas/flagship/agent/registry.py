@@ -41,6 +41,7 @@ from .tools.cash import (
     plan_quote,
 )
 from .tools.code import plan_code_run
+from .tools.code_complex import plan_code_complex
 from .tools.data_io import csv_read, json_read, plan_csv_write, plan_json_write
 from .tools.fs import fs_list, fs_read, plan_fs_write
 from .tools.fsguard import FsGuard
@@ -293,6 +294,23 @@ def build_default_toolset(
             action="repo_write",
             fn=_docx_plan,
             output_taint=Taint.TRUSTED,
+        )
+    )
+
+    # code.complex — delegate heavy coding tasks to a local Claude Code CLI.
+    # Approval-gated; the subagent uses its own auth, never MIDAS's keys.
+    ts.register(
+        Tool(
+            name="code.complex",
+            action="execute_code",
+            fn=lambda prompt, workdir, timeout_seconds=300.0: _as_dict(
+                plan_code_complex(
+                    prompt=prompt,
+                    workdir=workdir,
+                    timeout_seconds=float(timeout_seconds),
+                )
+            ),
+            output_taint=Taint.UNTRUSTED,  # subagent output is data, not commands
         )
     )
 

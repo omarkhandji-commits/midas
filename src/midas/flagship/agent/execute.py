@@ -27,6 +27,48 @@ def execute_approved_step(runtime: Any, request: ApprovalRequest) -> dict[str, A
     return handler(runtime, request)
 
 
+def _execute_code_complex(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    """Post-approval Claude Code delegation. Failure is recorded as DENY."""
+    from .tools.code_complex import CodeComplexError, execute_code_complex
+
+    payload = request.payload or {}
+    try:
+        result = execute_code_complex(payload)
+    except CodeComplexError as e:
+        runtime.append_receipt(
+            run_id=request.run_id,
+            agent="execute",
+            tool="code.complex.failed",
+            inputs={"approval_id": request.id},
+            outputs={"error": str(e)},
+            decision=Decision.DENY,
+            taint_out=Taint.UNTRUSTED,
+        )
+        raise
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool="code.complex.executed",
+        inputs={"approval_id": request.id},
+        outputs={
+            "duration_seconds": result.duration_seconds,
+            "exit_code": result.exit_code,
+            "truncated": result.truncated,
+            "text_len": len(result.text),
+        },
+        decision=Decision.ALLOW,
+        cost_usd=float(result.cost_usd),
+        taint_out=Taint.UNTRUSTED,
+    )
+    return {
+        "text": result.text,
+        "cost_usd": float(result.cost_usd),
+        "duration_seconds": result.duration_seconds,
+        "exit_code": result.exit_code,
+        "truncated": result.truncated,
+    }
+
+
 def _execute_stripe_payment_link(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     """Post-approval Stripe payment link. Failure is recorded as DENY."""
     from .tools.stripe_pay import StripeBackendError, execute_payment_link
@@ -402,4 +444,5 @@ _HANDLERS = {
     "image.draft": _cash_handler,
     "social.publish": _execute_social_publish,
     "stripe.payment_link": _execute_stripe_payment_link,
+    "code.complex": _execute_code_complex,
 }

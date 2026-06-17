@@ -7,6 +7,18 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Sub-agent Claude Code (`code.complex`).** Delegates heavy / multi-file
+  coding tasks to the operator's local ``claude`` CLI rather than
+  reimplementing that engine. Plan validates prompt + workdir; payload
+  carries the sha256 of the prompt. Executor shells out to ``claude -p
+  "<prompt>" --output-format json`` in the approved workdir with a
+  timeout (5-min default, 30-min ceiling) and parses the JSON result.
+  Action: ``execute_code`` (already APPROVE-tier). Honest constraints:
+  (1) MIDAS provider keys are stripped from the subprocess env — Claude
+  Code uses its own auth, the two stay separate; (2) no fallback to
+  ``code.run`` on failure (DENY receipt + raise — operator decides);
+  (3) the subagent's output is ``Taint.UNTRUSTED`` and any filesystem
+  changes still flow through MIDAS's ``fs.write`` approval.
 - **YouTube + TikTok social adapters.** ``YouTubeAdapter`` posts to the
   Community tab via the YouTube Data API v3 (requires user OAuth token —
   NOT an API key — and ``YOUTUBE_CHANNEL_ID``); refuses video upload in
