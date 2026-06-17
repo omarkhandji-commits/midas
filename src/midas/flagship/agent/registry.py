@@ -50,6 +50,7 @@ from .tools.image import plan_image
 from .tools.pdf import pdf_extract
 from .tools.sheet import plan_sheet_write, sheet_read
 from .tools.social import plan_social_publish
+from .tools.stripe_pay import plan_payment_link
 
 
 def build_default_toolset(
@@ -367,6 +368,25 @@ def build_default_toolset(
                 plan_adcopy(guard, path, product=product, audience=audience, variants=variants)
             ),
             output_taint=Taint.TRUSTED,
+        )
+    )
+
+    # stripe.payment_link — closes the cash loop. Approval-gated, no egress at
+    # plan time. STRIPE_API_KEY is only read at execute time.
+    ts.register(
+        Tool(
+            name="stripe.payment_link",
+            action="publish_public",
+            fn=lambda description, amount_usd, currency="USD", product_name="": _as_dict(
+                plan_payment_link(
+                    description=description,
+                    amount_usd=float(amount_usd),
+                    currency=currency,
+                    product_name=product_name,
+                )
+            ),
+            output_taint=Taint.UNTRUSTED,
+            has_egress=True,
         )
     )
 

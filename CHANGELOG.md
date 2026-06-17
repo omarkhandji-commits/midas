@@ -7,6 +7,19 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Stripe payment link tool (`stripe.payment_link`).** Closes the cash loop —
+  before this tool, the agent could draft a quote/proposal/invoice but had no
+  way to collect the cash without manual operator work. The planner validates
+  amount + currency + description against Stripe's per-currency minimum and
+  stores the canonical intent (currency|amount_minor|product|description) in
+  the approval payload with a sha256 hash. ``STRIPE_API_KEY`` is read only at
+  execute time, never at plan time — an unapproved request can never reach
+  Stripe. The implementation refuses publishable keys (``pk_…``) upfront with
+  a clear message rather than letting Stripe return 401. Two backends ship:
+  ``StubStripeBackend`` (deterministic, no egress) and ``StripeBackendImpl``
+  (real REST calls to ``/v1/prices`` + ``/v1/payment_links``, form-encoded as
+  the API expects). Failed link creation writes a ``DENY`` receipt — never
+  silently dropped.
 - **Social publish tool (`social.publish`).** Approval-gated, adapter-based.
   The planner validates platform / handle / text and resolves media paths
   through ``FsGuard`` — no credential read, no egress at plan time. The

@@ -27,6 +27,47 @@ def execute_approved_step(runtime: Any, request: ApprovalRequest) -> dict[str, A
     return handler(runtime, request)
 
 
+def _execute_stripe_payment_link(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    """Post-approval Stripe payment link. Failure is recorded as DENY."""
+    from .tools.stripe_pay import StripeBackendError, execute_payment_link
+
+    payload = request.payload or {}
+    try:
+        result = execute_payment_link(payload)
+    except StripeBackendError as e:
+        runtime.append_receipt(
+            run_id=request.run_id,
+            agent="execute",
+            tool="stripe.payment_link.failed",
+            inputs={"approval_id": request.id},
+            outputs={"error": str(e)},
+            decision=Decision.DENY,
+            taint_out=Taint.UNTRUSTED,
+        )
+        raise
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool="stripe.payment_link.executed",
+        inputs={"approval_id": request.id},
+        outputs={
+            "payment_link_id": result.payment_link_id,
+            "url": result.url,
+            "amount_minor": result.amount_minor,
+            "currency": result.currency,
+            "raw_status": result.raw_status,
+        },
+        decision=Decision.ALLOW,
+        taint_out=Taint.UNTRUSTED,
+    )
+    return {
+        "payment_link_id": result.payment_link_id,
+        "url": result.url,
+        "amount_minor": result.amount_minor,
+        "currency": result.currency,
+    }
+
+
 def _execute_social_publish(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     """Post-approval social publish — calls the platform adapter and records
     a receipt tagged with ``platform`` + ``post_id`` so per-post ROI can join.
@@ -360,4 +401,5 @@ _HANDLERS = {
     "adcopy.draft": _cash_handler,
     "image.draft": _cash_handler,
     "social.publish": _execute_social_publish,
+    "stripe.payment_link": _execute_stripe_payment_link,
 }
