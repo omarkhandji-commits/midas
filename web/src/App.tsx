@@ -16,6 +16,7 @@ import { HowItWorksPage } from "@/pages/HowItWorks";
 import { ProvidersPage } from "@/pages/Providers";
 import { MarketPage } from "@/pages/Market";
 import { SchedulePage } from "@/pages/Schedule";
+import { CalendarPage } from "@/pages/Calendar";
 import { SkillsPage } from "@/pages/Skills";
 import { SettingsPage } from "@/pages/Settings";
 
@@ -42,6 +43,7 @@ const router = createBrowserRouter([
       { path: "providers", element: <ProvidersPage /> },
       { path: "market", element: <MarketPage /> },
       { path: "schedule", element: <SchedulePage /> },
+      { path: "calendar", element: <CalendarPage /> },
       { path: "skills", element: <SkillsPage /> },
       { path: "settings", element: <SettingsPage /> },
     ],

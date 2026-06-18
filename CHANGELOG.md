@@ -7,6 +7,13 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Calendar page (`/calendar`).** 7-day grid view of `/api/scheduled-posts`.
+  Monday-anchored, UTC, prev/this-week/next navigation, per-post status
+  badge (pending/published/failed/cancelled), inline cancel button for
+  pending posts. Honest: time displayed as UTC HH:MM — local conversion
+  is left to V2 (timezone discovery requires either persona prefs or a
+  browser-locale read, both worth a separate slice).
+
 - **`ScheduledPostStore` + `/api/scheduled-posts` — queued social posts.**
   JSON-backed queue of pending posts with a `scheduled_at_iso`
   timestamp. ISO-8601 with explicit timezone is enforced (naive

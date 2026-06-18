@@ -59,6 +59,7 @@ const groups: NavGroup[] = [
     items: [
       { to: "/market", label: "Market Radar", icon: Radar },
       { to: "/schedule", label: "Schedule", icon: CalendarClock },
+      { to: "/calendar", label: "Calendar", icon: CalendarClock },
       { to: "/skills", label: "Skills", icon: Sparkles },
     ],
   },
