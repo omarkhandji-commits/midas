@@ -52,6 +52,7 @@ from .tools.fsguard import FsGuard
 from .tools.http import as_tool_payload as _http_payload
 from .tools.http import http_fetch
 from .tools.image import plan_image
+from .tools.lead import record_leads
 from .tools.pdf import pdf_extract
 from .tools.sheet import plan_sheet_write, sheet_read
 from .tools.skill import skill_index, skill_load
@@ -74,6 +75,7 @@ def build_default_toolset(
     fetcher: Fetcher | None = None,
     verifier: SourceVerifier | None = None,
     skill_registry: Any = None,
+    memory_path: str | None = None,
 ) -> Toolset:
     ts = Toolset(sentinel, ledger=ledger, approvals=approvals, run_id=run_id)
 
@@ -258,6 +260,22 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # lead.record — AUTO-tier CRM bridge from inbox → MemoryKind.RESULT.
+    # Idempotent on (from_addr, uid); writes only when an intent word matches.
+    if memory_path is not None:
+        _mem_path = memory_path
+        ts.register(
+            Tool(
+                name="lead.record",
+                action="read_local_files",
+                fn=lambda messages: record_leads(
+                    messages=messages,
+                    store_path=_mem_path,
+                ).as_dict(),
+                output_taint=Taint.TRUSTED,
+            )
+        )
+
     # affiliate.link.generate — AUTO-tier pure URL builder. No egress.
     ts.register(
         Tool(

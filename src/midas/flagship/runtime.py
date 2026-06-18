@@ -119,6 +119,7 @@ class Runtime:
             search=self.search,
             fetcher=self.fetcher,
             verifier=self.verifier,
+            memory_path=getattr(self.memory, "path", None),
         )
 
     def agent_loop(self, *, run_id: str = "", max_steps: int = 8) -> AgentLoop:

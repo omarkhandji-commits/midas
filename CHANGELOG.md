@@ -7,6 +7,19 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`lead.record` tool — CRM bridge inbox → memory.**
+  AUTO-tier, no egress. Takes the `messages` list from
+  `email.inbox.read` and promotes intent-shaped messages to
+  `MemoryKind.RESULT` entries tagged `["lead", "cash-signal"]`. Dedup
+  key `lead:{from_addr}:{uid}` makes re-runs idempotent. The intent
+  classifier is a small fixed keyword list (`interested`, `demo`,
+  `quote`, `pricing`, `buy`, `budget`, `invoice`, `proposal`, …) —
+  conservative on purpose (false positives waste planner attention).
+  Honest: we do NOT auto-reply, do NOT mark-as-read, do NOT write
+  `MemoryKind.CASH` (no money has moved — `cash-signal` tag biases
+  the planner without lying about proof level). `proof_level=LOW`,
+  no sources. Cap 100 messages per call.
+
 - **`affiliate.link.generate` tool — Phase 7 cash vein.**
   AUTO-tier pure URL builder: takes a merchant URL and a campaign,
   returns a tracked link with UTM params (`utm_source`, `utm_medium`,
