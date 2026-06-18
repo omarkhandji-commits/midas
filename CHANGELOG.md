@@ -7,6 +7,17 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`course.outline_draft` tool — WS-X cash vein, structured outline.**
+  AUTO-tier render. Produces a structured per-module outline (goal +
+  exercise prompt + needs_research flag) and a markdown rendering.
+  Default module shape covers the unglamorous 10-stage arc most
+  online courses follow (Foundations → Core mechanic → Pitfalls →
+  Walkthrough → Measurement → Iteration → Scale-up → Edge cases →
+  Synthesis → Next steps). Honest: we do NOT fabricate lesson
+  content — `key_concepts` arrives empty and `needs_research=true`
+  marks the modules that need a research pass before recording. No
+  price claim, no sales promise. Module count capped at 20.
+
 - **`newsletter.draft` tool — WS-U cash vein, CAN-SPAM/CASL artifact.**
   AUTO-tier render (no egress). Produces HTML + plaintext + sha256
   intent, with the required unsubscribe link and physical postal

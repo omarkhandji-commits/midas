@@ -9,7 +9,6 @@ from midas.flagship.agent.tools.newsletter import (
     plan_newsletter,
 )
 
-
 _ADDR = "123 Main St, Montreal, QC H1A 1A1, Canada"
 _UNSUB = "https://kenzassweet.ca/unsubscribe?token=abc"
 

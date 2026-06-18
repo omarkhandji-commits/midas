@@ -45,6 +45,7 @@ from .tools.cash import (
 from .tools.code import plan_code_run
 from .tools.code_complex import plan_code_complex
 from .tools.code_edit import plan_code_edits
+from .tools.course import plan_course_outline
 from .tools.data_io import csv_read, json_read, plan_csv_write, plan_json_write
 from .tools.email_deliverability import check_deliverability
 from .tools.email_inbox import read_inbox
@@ -264,6 +265,23 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # course.outline_draft — AUTO-tier structured course outline.
+    ts.register(
+        Tool(
+            name="course.outline_draft",
+            action="read_local_files",
+            fn=lambda topic, audience, n_modules=5,
+            learning_objectives=None, module_titles=None: plan_course_outline(
+                topic=topic,
+                audience=audience,
+                n_modules=int(n_modules),
+                learning_objectives=learning_objectives,
+                module_titles=module_titles,
+            ).to_dict(),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+
     # newsletter.draft — AUTO-tier render of CAN-SPAM/CASL-compliant artifact.
     # No egress; render only. Refuses without unsubscribe URL + physical address.
     ts.register(
