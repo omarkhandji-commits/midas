@@ -7,6 +7,20 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Adapter extensions — IG carousel, YouTube video upload, TikTok status poll.**
+  Instagram adapter now publishes multi-image carousels (cap 10, per
+  Graph API): one child container per URL, parent CAROUSEL container,
+  publish. YouTube adapter now uploads videos via resumable upload
+  (POST init → PUT bytes); title taken from first line of text (100
+  char cap), description from full text, privacy from
+  `YOUTUBE_PRIVACY` env (default `private` — operator flips after
+  reviewing in YouTube Studio). TikTok adapter gains
+  `fetch_status(publish_id, …)` polling /publish/status/fetch/ —
+  returns `tiktok_ok` on `PUBLISH_COMPLETE`, raises on `FAILED` with
+  the surfaced reason, returns `tiktok_pending_timeout` (empty
+  permalink — never invents one) when poll budget runs out. Polling
+  is opt-in via `TIKTOK_POLL=1`.
+
 - **`drain_due()` + `POST /api/scheduled-posts/drain` — close the scheduling loop.**
   Drains pending posts whose `scheduled_at_iso` <= now by re-validating
   intent through `plan_social_publish` and enqueuing a `send_social`

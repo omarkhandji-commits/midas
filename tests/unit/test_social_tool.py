@@ -258,14 +258,14 @@ def test_instagram_refuses_local_file_path(monkeypatch: pytest.MonkeyPatch) -> N
         )
 
 
-def test_instagram_refuses_carousel_in_this_slice(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_instagram_refuses_carousel_over_10(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INSTAGRAM_ACCESS_TOKEN", "fake")
     monkeypatch.setenv("INSTAGRAM_USER_ID", "17841400000000000")
     adapter = InstagramAdapter()
-    with pytest.raises(SocialAdapterError, match="carousel"):
+    with pytest.raises(SocialAdapterError, match="cap is 10"):
         adapter.publish(
             text="cap",
-            media_paths=["https://x.com/a.png", "https://x.com/b.png"],
+            media_paths=[f"https://x.com/{i}.png" for i in range(11)],
             account_handle="@brand",
         )
 
@@ -353,12 +353,125 @@ def test_youtube_without_channel_id_raises(monkeypatch: pytest.MonkeyPatch) -> N
         adapter.publish(text="hi", media_paths=[], account_handle="MyChannel")
 
 
-def test_youtube_refuses_video_upload_in_this_slice(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_youtube_video_upload_missing_file(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("YOUTUBE_OAUTH_TOKEN", "fake")
-    monkeypatch.setenv("YOUTUBE_CHANNEL_ID", "UCxxxx")
     adapter = YouTubeAdapter()
-    with pytest.raises(SocialAdapterError, match="video upload"):
-        adapter.publish(text="hi", media_paths=["clip.mp4"], account_handle="MyChannel")
+    with pytest.raises(SocialAdapterError, match="video file not found"):
+        adapter.publish(
+            text="hi",
+            media_paths=["/nonexistent/clip.mp4"],
+            account_handle="MyChannel",
+        )
+
+
+def test_youtube_video_upload_too_many_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("YOUTUBE_OAUTH_TOKEN", "fake")
+    a = tmp_path / "a.mp4"
+    b = tmp_path / "b.mp4"
+    a.write_bytes(b"x")
+    b.write_bytes(b"y")
+    adapter = YouTubeAdapter()
+    with pytest.raises(SocialAdapterError, match="single file"):
+        adapter.publish(
+            text="hi", media_paths=[str(a), str(b)], account_handle="MyChannel",
+        )
+
+
+def test_youtube_video_upload_invalid_privacy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("YOUTUBE_OAUTH_TOKEN", "fake")
+    monkeypatch.setenv("YOUTUBE_PRIVACY", "bogus")
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"fake-bytes")
+    adapter = YouTubeAdapter()
+    with pytest.raises(SocialAdapterError, match="privacy must be"):
+        adapter.publish(
+            text="hi", media_paths=[str(clip)], account_handle="MyChannel",
+        )
+
+
+def test_tiktok_status_fetch_needs_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TIKTOK_ACCESS_TOKEN", raising=False)
+    adapter = TikTokAdapter()
+    with pytest.raises(SocialAdapterError, match="TIKTOK_ACCESS_TOKEN"):
+        adapter.fetch_status(publish_id="abc", max_polls=1, delay_seconds=0)
+
+
+def test_tiktok_status_fetch_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+    """fetch_status returns PublishResult on PUBLISH_COMPLETE."""
+    import httpx
+
+    from midas.flagship.agent.tools.social import PublishResult
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "data": {
+                    "status": "PUBLISH_COMPLETE",
+                    "publicaly_available_post_id": "v999",
+                }
+            }
+
+    def fake_post(*_a, **_kw):
+        return _Resp()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    adapter = TikTokAdapter()
+    result = adapter.fetch_status(
+        publish_id="abc", token="tok", max_polls=1, delay_seconds=0,
+    )
+    assert isinstance(result, PublishResult)
+    assert result.post_id == "v999"
+    assert "v999" in result.permalink
+    assert result.raw_status == "tiktok_ok"
+
+
+def test_tiktok_status_fetch_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FAILED raises with the surfaced reason."""
+    import httpx
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"data": {"status": "FAILED", "fail_reason": "policy violation"}}
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **kw: _Resp())
+    adapter = TikTokAdapter()
+    with pytest.raises(SocialAdapterError, match="policy violation"):
+        adapter.fetch_status(
+            publish_id="abc", token="tok", max_polls=1, delay_seconds=0,
+        )
+
+
+def test_tiktok_status_fetch_timeout_returns_pending(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exhausted poll budget returns pending_timeout, never invents a permalink."""
+    import httpx
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"data": {"status": "PROCESSING_UPLOAD"}}
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **kw: _Resp())
+    adapter = TikTokAdapter()
+    result = adapter.fetch_status(
+        publish_id="pid_xyz", token="tok", max_polls=2, delay_seconds=0,
+    )
+    assert result.post_id == "pid_xyz"
+    assert result.permalink == ""
+    assert result.raw_status == "tiktok_pending_timeout"
 
 
 # ── TikTok ────────────────────────────────────────────────────────────────

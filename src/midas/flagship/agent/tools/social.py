@@ -566,11 +566,16 @@ class InstagramAdapter:
                 "instagram requires media (image/video); text-only posts "
                 "are not supported by the Instagram Graph API"
             )
-        if len(media_paths) > 1:
+        if len(media_paths) > 10:
             raise SocialAdapterError(
-                "instagram adapter ships single-image posts only in this slice; "
-                "carousel (multi-image) arrives next"
+                f"instagram carousel cap is 10 images, got {len(media_paths)}"
             )
+        for ref in media_paths:
+            if not ref.startswith(("http://", "https://")):
+                raise SocialAdapterError(
+                    "instagram media must be public https URLs the API can fetch; "
+                    "upload to S3 / Cloudinary first and pass the URL"
+                )
         token = os.environ.get("INSTAGRAM_ACCESS_TOKEN")
         user_id = os.environ.get("INSTAGRAM_USER_ID")
         if not token:
@@ -582,14 +587,6 @@ class InstagramAdapter:
                 "instagram adapter needs INSTAGRAM_USER_ID "
                 "(Business or Creator account id, NOT a personal account)"
             )
-        # Instagram needs a publicly-reachable image URL. A local file path is
-        # NOT what the API wants — refuse early instead of failing at the call.
-        media_ref = media_paths[0]
-        if not media_ref.startswith(("http://", "https://")):
-            raise SocialAdapterError(
-                "instagram media must be a public https URL the API can fetch; "
-                "upload to S3 / Cloudinary first and pass the URL"
-            )
         try:
             import httpx
         except ImportError as e:
@@ -598,26 +595,87 @@ class InstagramAdapter:
             ) from e
 
         graph = "https://graph.facebook.com/v19.0"
-        try:
-            container = httpx.post(
-                f"{graph}/{user_id}/media",
-                data={
-                    "image_url": media_ref,
-                    "caption": text,
-                    "access_token": token,
-                },
-                timeout=30.0,
-            )
-        except httpx.HTTPError as e:
-            raise SocialAdapterError(f"instagram container request failed: {e}") from e
-        if container.status_code != 200:
-            raise SocialAdapterError(
-                f"instagram /media returned {container.status_code}: "
-                f"{container.text[:200]}"
-            )
-        container_id = str((container.json() or {}).get("id") or "")
-        if not container_id:
-            raise SocialAdapterError("instagram container response is missing id")
+        if len(media_paths) == 1:
+            # Single-image fast path: one container, caption inline.
+            try:
+                container = httpx.post(
+                    f"{graph}/{user_id}/media",
+                    data={
+                        "image_url": media_paths[0],
+                        "caption": text,
+                        "access_token": token,
+                    },
+                    timeout=30.0,
+                )
+            except httpx.HTTPError as e:
+                raise SocialAdapterError(
+                    f"instagram container request failed: {e}"
+                ) from e
+            if container.status_code != 200:
+                raise SocialAdapterError(
+                    f"instagram /media returned {container.status_code}: "
+                    f"{container.text[:200]}"
+                )
+            container_id = str((container.json() or {}).get("id") or "")
+            if not container_id:
+                raise SocialAdapterError(
+                    "instagram container response is missing id"
+                )
+        else:
+            # Carousel: each child is its own container without caption, then
+            # a parent CAROUSEL container that references them by id.
+            child_ids: list[str] = []
+            for url in media_paths:
+                try:
+                    child = httpx.post(
+                        f"{graph}/{user_id}/media",
+                        data={
+                            "image_url": url,
+                            "is_carousel_item": "true",
+                            "access_token": token,
+                        },
+                        timeout=30.0,
+                    )
+                except httpx.HTTPError as e:
+                    raise SocialAdapterError(
+                        f"instagram carousel child request failed: {e}"
+                    ) from e
+                if child.status_code != 200:
+                    raise SocialAdapterError(
+                        f"instagram carousel child {len(child_ids)} returned "
+                        f"{child.status_code}: {child.text[:200]}"
+                    )
+                cid = str((child.json() or {}).get("id") or "")
+                if not cid:
+                    raise SocialAdapterError(
+                        "instagram carousel child response is missing id"
+                    )
+                child_ids.append(cid)
+            try:
+                parent = httpx.post(
+                    f"{graph}/{user_id}/media",
+                    data={
+                        "media_type": "CAROUSEL",
+                        "children": ",".join(child_ids),
+                        "caption": text,
+                        "access_token": token,
+                    },
+                    timeout=30.0,
+                )
+            except httpx.HTTPError as e:
+                raise SocialAdapterError(
+                    f"instagram carousel parent request failed: {e}"
+                ) from e
+            if parent.status_code != 200:
+                raise SocialAdapterError(
+                    f"instagram carousel parent returned {parent.status_code}: "
+                    f"{parent.text[:200]}"
+                )
+            container_id = str((parent.json() or {}).get("id") or "")
+            if not container_id:
+                raise SocialAdapterError(
+                    "instagram carousel parent response is missing id"
+                )
 
         try:
             publish = httpx.post(
@@ -834,10 +892,7 @@ class YouTubeAdapter:
         account_handle: str,
     ) -> PublishResult:
         if media_paths:
-            raise SocialAdapterError(
-                "youtube adapter posts Community-tab text in this slice; "
-                "video upload (resumable, multi-part) arrives next"
-            )
+            return self._upload_video(text=text, media_paths=media_paths)
         token = os.environ.get("YOUTUBE_OAUTH_TOKEN")
         channel_id = os.environ.get("YOUTUBE_CHANNEL_ID")
         if not token:
@@ -890,6 +945,107 @@ class YouTubeAdapter:
             permalink=f"https://www.youtube.com/post/{post_id}",
             cost_usd=0.0,
             raw_status="youtube_ok",
+        )
+
+    def _upload_video(
+        self, *, text: str, media_paths: list[str]
+    ) -> PublishResult:
+        """Resumable video upload via /upload/youtube/v3/videos.
+
+        Two steps: (1) start a resumable session with metadata, get the
+        upload URL from the Location header; (2) PUT the video bytes.
+        Title comes from the first 100 chars of ``text`` (YouTube cap);
+        the remainder becomes the description. Privacy defaults to
+        ``private`` — the operator flips it to public/unlisted manually
+        once they've reviewed the upload in YouTube Studio.
+        """
+        if len(media_paths) > 1:
+            raise SocialAdapterError(
+                "youtube video upload takes a single file; got "
+                f"{len(media_paths)} paths"
+            )
+        from pathlib import Path as _Path
+
+        video_path = _Path(media_paths[0])
+        if not video_path.is_file():
+            raise SocialAdapterError(
+                f"youtube video file not found: {video_path}"
+            )
+        token = os.environ.get("YOUTUBE_OAUTH_TOKEN")
+        if not token:
+            raise SocialAdapterError(
+                "youtube adapter needs YOUTUBE_OAUTH_TOKEN "
+                "(user OAuth token with 'youtube.upload' scope)"
+            )
+        try:
+            import httpx
+        except ImportError as e:
+            raise SocialAdapterError(
+                "youtube adapter needs httpx; install with `pip install httpx`"
+            ) from e
+
+        title = text.strip().split("\n", 1)[0][:100] or "Untitled"
+        privacy = os.environ.get("YOUTUBE_PRIVACY", "private").strip().lower()
+        if privacy not in ("private", "public", "unlisted"):
+            raise SocialAdapterError(
+                f"youtube privacy must be private/public/unlisted, got {privacy!r}"
+            )
+        size = video_path.stat().st_size
+        metadata = {
+            "snippet": {"title": title, "description": text},
+            "status": {"privacyStatus": privacy},
+        }
+        try:
+            start = httpx.post(
+                "https://www.googleapis.com/upload/youtube/v3/videos",
+                params={"uploadType": "resumable", "part": "snippet,status"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=UTF-8",
+                    "X-Upload-Content-Length": str(size),
+                    "X-Upload-Content-Type": "video/*",
+                },
+                json=metadata,
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(
+                f"youtube upload session start failed: {e}"
+            ) from e
+        if start.status_code != 200:
+            raise SocialAdapterError(
+                f"youtube upload init returned {start.status_code}: "
+                f"{start.text[:200]}"
+            )
+        upload_url = start.headers.get("Location") or start.headers.get("location")
+        if not upload_url:
+            raise SocialAdapterError(
+                "youtube upload init missing Location header"
+            )
+        try:
+            with video_path.open("rb") as fh:
+                up = httpx.put(
+                    upload_url,
+                    content=fh.read(),
+                    headers={"Content-Type": "video/*"},
+                    timeout=600.0,
+                )
+        except httpx.HTTPError as e:
+            raise SocialAdapterError(
+                f"youtube video PUT failed: {e}"
+            ) from e
+        if up.status_code not in (200, 201):
+            raise SocialAdapterError(
+                f"youtube video PUT returned {up.status_code}: {up.text[:200]}"
+            )
+        video_id = str((up.json() or {}).get("id") or "")
+        if not video_id:
+            raise SocialAdapterError("youtube upload response missing video id")
+        return PublishResult(
+            post_id=video_id,
+            permalink=f"https://www.youtube.com/watch?v={video_id}",
+            cost_usd=0.0,
+            raw_status=f"youtube_video_{privacy}",
         )
 
 
@@ -990,15 +1146,101 @@ class TikTokAdapter:
         publish_id = str(data.get("publish_id") or "")
         if not publish_id:
             raise SocialAdapterError("tiktok init response is missing publish_id")
-        # Honest: the TikTok backend ingests the URL asynchronously and the
-        # eventual post id only becomes available via /publish/status. The
-        # poll loop is the next slice — for now we return the publish_id and
-        # a stable permalink shape; the operator confirms in the TikTok app.
+        # If the operator opted in to status polling, block until the post is
+        # processed (or fails). Polling defaults OFF — returning pending is
+        # honest and lets the agent move on.
+        if os.environ.get("TIKTOK_POLL", "").strip() in ("1", "true", "yes"):
+            final = self.fetch_status(publish_id=publish_id, token=token)
+            return final
         return PublishResult(
             post_id=publish_id,
             permalink=f"https://www.tiktok.com/@{account_handle.lstrip('@')}",
             cost_usd=0.0,
             raw_status="tiktok_pending",
+        )
+
+    def fetch_status(
+        self,
+        *,
+        publish_id: str,
+        token: str | None = None,
+        max_polls: int = 6,
+        delay_seconds: float = 5.0,
+    ) -> PublishResult:
+        """Poll TikTok's /publish/status/fetch/ until terminal or budget runs out.
+
+        Terminal states are ``PUBLISH_COMPLETE`` (success — returns the
+        post id) and ``FAILED`` (raises with the surfaced reason). All
+        other states (``PROCESSING_DOWNLOAD``, ``PROCESSING_UPLOAD``,
+        ``PROCESSING_PUBLISH``) cause another poll up to ``max_polls``.
+
+        Honest: TikTok's terminal post URL only contains the final
+        video/photo id, not the publish_id. If we exhaust the budget,
+        we return ``tiktok_pending`` so the caller knows status is
+        unknown — never invent a permalink we can't verify.
+        """
+        tok = token or os.environ.get("TIKTOK_ACCESS_TOKEN")
+        if not tok:
+            raise SocialAdapterError(
+                "tiktok status poll needs TIKTOK_ACCESS_TOKEN"
+            )
+        try:
+            import httpx
+        except ImportError as e:
+            raise SocialAdapterError(
+                "tiktok adapter needs httpx; install with `pip install httpx`"
+            ) from e
+        import time as _time
+
+        for _ in range(max(1, max_polls)):
+            try:
+                resp = httpx.post(
+                    "https://open.tiktokapis.com/v2/post/publish/status/fetch/",
+                    headers={
+                        "Authorization": f"Bearer {tok}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"publish_id": publish_id},
+                    timeout=20.0,
+                )
+            except httpx.HTTPError as e:
+                raise SocialAdapterError(
+                    f"tiktok status fetch failed: {e}"
+                ) from e
+            if resp.status_code != 200:
+                raise SocialAdapterError(
+                    f"tiktok status fetch returned {resp.status_code}: "
+                    f"{resp.text[:200]}"
+                )
+            data = (resp.json() or {}).get("data") or {}
+            status = str(data.get("status") or "").upper()
+            if status == "PUBLISH_COMPLETE":
+                publicaly_available_post_id = str(
+                    data.get("publicaly_available_post_id")
+                    or data.get("post_id")
+                    or publish_id
+                )
+                return PublishResult(
+                    post_id=publicaly_available_post_id,
+                    permalink=(
+                        f"https://www.tiktok.com/@/video/"
+                        f"{publicaly_available_post_id}"
+                    ),
+                    cost_usd=0.0,
+                    raw_status="tiktok_ok",
+                )
+            if status == "FAILED":
+                reason = str(data.get("fail_reason") or "unknown reason")
+                raise SocialAdapterError(
+                    f"tiktok publish failed: {reason}"
+                )
+            _time.sleep(delay_seconds)
+        # Budget exhausted — honest: we don't know the outcome.
+        return PublishResult(
+            post_id=publish_id,
+            permalink="",
+            cost_usd=0.0,
+            raw_status="tiktok_pending_timeout",
         )
 
 
