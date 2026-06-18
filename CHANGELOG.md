@@ -7,6 +7,18 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`ScheduledPostStore` + `/api/scheduled-posts` — queued social posts.**
+  JSON-backed queue of pending posts with a `scheduled_at_iso`
+  timestamp. ISO-8601 with explicit timezone is enforced (naive
+  timestamps refused — local-vs-UTC ambiguity is the kind of bug
+  that publishes at the wrong hour). Status is one-way:
+  `pending → published | failed | cancelled`. Single-process lock for
+  add/mark/cancel. Endpoints: GET `/api/scheduled-posts` (filter by
+  status/start/end window), POST add, DELETE cancel — receipt-logged.
+  Honest: we do NOT auto-fire — a separate drain step re-validates
+  through `plan_social_publish` and queues normal approval. The
+  store records intent only.
+
 - **`lead.record` tool — CRM bridge inbox → memory.**
   AUTO-tier, no egress. Takes the `messages` list from
   `email.inbox.read` and promotes intent-shaped messages to

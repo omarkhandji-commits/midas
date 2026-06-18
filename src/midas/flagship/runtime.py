@@ -44,6 +44,7 @@ from midas.flagship.provider_settings import (
     SettingsStore,
 )
 from midas.flagship.schedule import ScheduleStore
+from midas.flagship.scheduled_posts import ScheduledPostStore
 from midas.flagship.skills import SkillRegistry
 
 
@@ -78,6 +79,7 @@ class Runtime:
     settings_store: SettingsStore
     channels: ChannelManager
     schedule_store: ScheduleStore
+    scheduled_posts: ScheduledPostStore
     skill_registry: SkillRegistry
     fs_guard: FsGuard | None = None
 
@@ -159,6 +161,7 @@ class Runtime:
             channels=self.channels,
             fetcher=self.fetcher,
             schedule_store=self.schedule_store,
+            scheduled_posts=self.scheduled_posts,
             skill_registry=self.skill_registry,
             fs_guard=self.fs_guard,
         )
@@ -199,6 +202,7 @@ def build_runtime(base_dir: str | Path) -> Runtime:
         DashboardSettings.from_config(config),
     )
     schedule_store = ScheduleStore(state / "schedules.json")
+    scheduled_posts = ScheduledPostStore(state / "scheduled_posts.json")
     skill_registry = SkillRegistry(state)
 
     # Workspace = the project dir. fsguard enforces policy.filesystem (workspace-only,
@@ -225,6 +229,7 @@ def build_runtime(base_dir: str | Path) -> Runtime:
         settings_store=settings_store,
         channels=channels,
         schedule_store=schedule_store,
+        scheduled_posts=scheduled_posts,
         skill_registry=skill_registry,
         fs_guard=fs_guard,
     )

@@ -86,6 +86,7 @@ class DashboardDeps:
     channels: Any = None  # ChannelManager for owner-gated channel setup
     fetcher: Any = None  # Fetcher used by Market Radar snapshot endpoints (optional)
     schedule_store: Any = None  # ScheduleStore for recipe CRUD (optional)
+    scheduled_posts: Any = None  # ScheduledPostStore for queued posts (optional)
     skill_registry: Any = None  # SkillRegistry for skills CRUD (optional)
     fs_guard: Any = None  # FsGuard for the Do-mode executor (optional)
     chat_est_usd: float = 0.02
@@ -1823,6 +1824,67 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
             outputs={"removed": True},
         )
         return _json(200, {"ok": True})
+
+    @app.get("/api/scheduled-posts")
+    def api_scheduled_posts_list(request: Request) -> Response:
+        _require_session(request)
+        if deps.scheduled_posts is None:
+            return _json(200, {"posts": []})
+        status = request.query_params.get("status") or None
+        start = request.query_params.get("start") or None
+        end = request.query_params.get("end") or None
+        rows = deps.scheduled_posts.list_all(status=status, start_iso=start, end_iso=end)
+        return _json(200, {"posts": [r.to_dict() for r in rows]})
+
+    @app.post("/api/scheduled-posts")
+    async def api_scheduled_posts_add(request: Request) -> Response:
+        _require_session(request)
+        if deps.scheduled_posts is None:
+            return _json(503, {"error": "scheduled_posts store not configured"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        try:
+            post = deps.scheduled_posts.add(
+                platform=str(body.get("platform") or ""),
+                account_handle=str(body.get("account_handle") or ""),
+                text=str(body.get("text") or ""),
+                scheduled_at_iso=str(body.get("scheduled_at_iso") or ""),
+                media_paths=list(body.get("media_paths") or []),
+            )
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="scheduled_posts.add",
+            inputs={
+                "platform": post.platform,
+                "account_handle": post.account_handle,
+                "scheduled_at_iso": post.scheduled_at_iso,
+            },
+            outputs={"id": post.id},
+        )
+        return _json(200, {"ok": True, "post": post.to_dict()})
+
+    @app.delete("/api/scheduled-posts/{post_id}")
+    def api_scheduled_posts_cancel(request: Request, post_id: str) -> Response:
+        _require_session(request)
+        if deps.scheduled_posts is None:
+            return _json(503, {"error": "scheduled_posts store not configured"})
+        try:
+            cancelled = deps.scheduled_posts.cancel(post_id, reason="user cancelled")
+        except (KeyError, ValueError) as exc:
+            return _json(404, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="scheduled_posts.cancel",
+            inputs={"id": post_id},
+            outputs={"status": cancelled.status},
+        )
+        return _json(200, {"ok": True, "post": cancelled.to_dict()})
 
     @app.post("/api/webhooks/stripe")
     async def api_webhooks_stripe(request: Request) -> Response:
