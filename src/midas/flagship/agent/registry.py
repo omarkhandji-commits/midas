@@ -55,6 +55,7 @@ from .tools.http import as_tool_payload as _http_payload
 from .tools.http import http_fetch
 from .tools.image import plan_image
 from .tools.lead import record_leads
+from .tools.newsletter import plan_newsletter
 from .tools.pdf import pdf_extract
 from .tools.repo_map import build_repo_map
 from .tools.sheet import plan_sheet_write, sheet_read
@@ -263,6 +264,25 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # newsletter.draft — AUTO-tier render of CAN-SPAM/CASL-compliant artifact.
+    # No egress; render only. Refuses without unsubscribe URL + physical address.
+    ts.register(
+        Tool(
+            name="newsletter.draft",
+            action="read_local_files",
+            fn=lambda subject, body, unsubscribe_url, physical_address,
+            preview_text="", unsubscribe_label="Unsubscribe": plan_newsletter(
+                subject=subject,
+                body=body,
+                unsubscribe_url=unsubscribe_url,
+                physical_address=physical_address,
+                preview_text=preview_text,
+                unsubscribe_label=unsubscribe_label,
+            ).as_dict(),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+
     # blog.seo_lint — AUTO-tier deterministic SEO checklist on markdown.
     ts.register(
         Tool(

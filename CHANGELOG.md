@@ -7,6 +7,16 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`newsletter.draft` tool — WS-U cash vein, CAN-SPAM/CASL artifact.**
+  AUTO-tier render (no egress). Produces HTML + plaintext + sha256
+  intent, with the required unsubscribe link and physical postal
+  address baked in. REFUSES to render without both — the legal
+  must-haves are validated as preconditions, not "nice to have".
+  Tiny markdown→HTML converter (no third-party deps, no tracking
+  pixel, no third-party fonts). Drops `javascript:` / `data:` hrefs.
+  Subject + preview escaped. Plays with `email.send` (already
+  enforces no-bulk-without-unsubscribe).
+
 - **`blog.seo_lint` tool — WS-V foundation, deterministic SEO checklist.**
   AUTO-tier, pure text, no egress, zero install footprint (regex
   only). Parses optional YAML-ish front-matter (`title`, `description`)
