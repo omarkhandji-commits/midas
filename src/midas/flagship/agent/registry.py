@@ -43,6 +43,7 @@ from .tools.cash import (
 )
 from .tools.code import plan_code_run
 from .tools.code_complex import plan_code_complex
+from .tools.code_edit import plan_code_edits
 from .tools.data_io import csv_read, json_read, plan_csv_write, plan_json_write
 from .tools.email_deliverability import check_deliverability
 from .tools.email_inbox import read_inbox
@@ -261,6 +262,18 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # code.edit_plan — APPROVE-tier multi-file search/replace.
+    # All-or-nothing exact-match. Operator sees per-file LOC delta + sha256
+    # of intent. Rebuilt at execute time to refuse drift.
+    ts.register(
+        Tool(
+            name="code.edit_plan",
+            action="repo_write",
+            fn=lambda edits: _as_dict(plan_code_edits(guard, edits=edits)),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+
     # code.repo_map — AUTO-tier AST walk + import-graph ranking.
     # Foundation of the Phase 6 native coder: feeds the planner a ranked
     # list of which files matter most without dumping the whole repo.

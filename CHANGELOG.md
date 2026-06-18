@@ -7,6 +7,17 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`code.edit_plan` tool — Phase 6 step 2, exact-match multi-file edits.**
+  APPROVE-tier (`repo_write`). Input is a list of
+  `{file, old, new}` edits; per edit, `old` MUST appear exactly once in
+  the file or the whole plan refuses (zero match → re-read; multi
+  match → add more surrounding context to disambiguate). Multiple
+  edits to the same file apply in declaration order so a later edit
+  can reference text inserted by an earlier one. Output carries the
+  sha256-of-intent and per-file LOC delta. All-or-nothing — if any
+  single edit fails to validate, NO file is touched. Safety cap: 50
+  edits per plan. Foundation of the Aider-diff format edit loop.
+
 - **`code.repo_map` tool — Phase 6 step 1, foundation of the native coder.**
   AUTO-tier AST walk + import-graph ranking. Uses the stdlib ``ast``
   module — no tree-sitter native build, no third-party deps. Returns
