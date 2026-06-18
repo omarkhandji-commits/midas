@@ -2070,6 +2070,7 @@ _CAPABILITY_GROUPS: dict[str, str] = {
     "image.": "Cash artifacts",
     "social.": "Social",
     "stripe.": "Cash collection",
+    "affiliate.": "Cash collection",
     "research.": "Research",
     "web.": "Research",
     "http.": "Research",

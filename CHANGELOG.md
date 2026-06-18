@@ -7,6 +7,24 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`affiliate.link.generate` tool — Phase 7 cash vein.**
+  AUTO-tier pure URL builder: takes a merchant URL and a campaign,
+  returns a tracked link with UTM params (`utm_source`, `utm_medium`,
+  `utm_campaign`, optional `utm_content` / `utm_term`) plus a sha256
+  the operator can reconcile against the merchant's affiliate
+  dashboard. Honest: refuses to silently overwrite an existing UTM
+  on the merchant URL (almost always a planner mistake); refuses
+  non-http(s) schemes; refuses `extra_params` that collide with
+  reserved UTM keys; URL is NOT cloaked (FTC / ASA / EU UCPD
+  disclosure rules). Output `Taint.TRUSTED`, no egress.
+- **3 new exhaustive security invariants (Phase 8 fortress).**
+  (a) `email.send` REFUSES bulk (>1 recipient) without an unsubscribe
+  affordance — CAN-SPAM / CASL / GDPR. (b) `stripe.payment_link.draft`
+  refuses a `pk_*` publishable key at plan time. (c) `code.complex`
+  SCRUBS provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `STRIPE_API_KEY`, …) from the subprocess env before invoking the
+  `claude` CLI — sub-agent runs under its own auth.
+
 - **`email.send` tool — APPROVE-tier SMTP send (STARTTLS / SSL).**
   Closes the outreach loop: ``email.draft`` writes the ``.eml``,
   ``email.send`` actually puts it on the wire. Plan validates

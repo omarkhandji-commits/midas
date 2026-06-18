@@ -330,6 +330,107 @@ def test_social_publish_plan_does_not_egress() -> None:
     assert plan.sha256_intent  # planned without any network call
 
 
+def test_email_send_refuses_bulk_without_unsubscribe() -> None:
+    """Bulk mail with no opt-out language is spam-shaped — refuse at plan time.
+
+    CAN-SPAM, CASL, and GDPR all require an opt-out. We don't ship a feature
+    that silently violates them.
+    """
+    from midas.flagship.agent.tools.email_send import plan_email_send
+
+    with pytest.raises(ValueError, match="unsubscribe affordance"):
+        plan_email_send(
+            to=["a@x.com", "b@x.com"],
+            subject="Big launch news",
+            body="Check out our new product. Thanks for being a customer.",
+        )
+
+
+def test_stripe_payment_link_refuses_publishable_key() -> None:
+    """A pk_ key can't create payment links — surface a clear refusal instead
+    of letting Stripe return 401."""
+    import os
+
+    from midas.flagship.agent.tools.stripe_pay import (
+        StripeBackendError,
+        StripeBackendImpl,
+    )
+
+    saved = os.environ.get("STRIPE_API_KEY")
+    os.environ["STRIPE_API_KEY"] = "pk_live_fake"
+    try:
+        backend = StripeBackendImpl()
+        with pytest.raises(StripeBackendError, match="publishable key"):
+            backend.create_payment_link(
+                description="x", amount_minor=1000, currency="usd", product_name="x"
+            )
+    finally:
+        if saved is None:
+            os.environ.pop("STRIPE_API_KEY", None)
+        else:
+            os.environ["STRIPE_API_KEY"] = saved
+
+
+def test_code_complex_scrubs_provider_keys_from_env(tmp_path: Path) -> None:
+    """MIDAS provider keys MUST NOT leak into the Claude Code subprocess env.
+
+    The two agents have separate auth; mixing them defeats the keychain.
+    """
+    import os
+    from unittest.mock import patch
+
+    from midas.flagship.agent.tools.code_complex import (
+        _sha256,
+        execute_code_complex,
+    )
+
+    saved_openai = os.environ.get("OPENAI_API_KEY")
+    saved_stripe = os.environ.get("STRIPE_API_KEY")
+    os.environ["OPENAI_API_KEY"] = "sk-secret-do-not-leak"
+    os.environ["STRIPE_API_KEY"] = "sk_live_do_not_leak"
+    captured: dict[str, dict[str, str]] = {}
+
+    class _FakeProc:
+        returncode = 0
+        stdout = '{"result": "ok", "cost_usd": 0.0}'
+        stderr = ""
+
+    def _fake_run(_args, **kwargs):
+        captured["env"] = kwargs.get("env") or {}
+        return _FakeProc()
+
+    try:
+        with patch(
+            "midas.flagship.agent.tools.code_complex.find_claude_cli",
+            return_value="/usr/bin/claude",
+        ), patch(
+            "midas.flagship.agent.tools.code_complex.subprocess.run", _fake_run
+        ), patch(
+            "midas.flagship.agent.tools.code_complex._monotonic",
+            return_value=0.0,
+        ):
+            execute_code_complex(
+                {
+                    "prompt": "hi",
+                    "workdir": str(tmp_path),
+                    "timeout_seconds": 60,
+                    "sha256_prompt": _sha256("hi"),
+                }
+            )
+        env = captured["env"]
+        assert "OPENAI_API_KEY" not in env
+        assert "STRIPE_API_KEY" not in env
+    finally:
+        if saved_openai is None:
+            os.environ.pop("OPENAI_API_KEY", None)
+        else:
+            os.environ["OPENAI_API_KEY"] = saved_openai
+        if saved_stripe is None:
+            os.environ.pop("STRIPE_API_KEY", None)
+        else:
+            os.environ["STRIPE_API_KEY"] = saved_stripe
+
+
 def test_social_publish_executor_refuses_drift() -> None:
     """Tamper with the payload between approval and execute — must be refused."""
     from midas.flagship.agent.tools.social import (

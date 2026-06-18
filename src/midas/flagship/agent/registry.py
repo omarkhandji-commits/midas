@@ -24,6 +24,7 @@ from midas.core.web.fetch import Fetcher
 from midas.core.web.search import SearchAdapter
 from midas.core.web.verify import SourceVerifier
 
+from .tools.affiliate import generate_affiliate_link
 from .tools.artifact import (
     plan_artifact_code,
     plan_artifact_email,
@@ -257,6 +258,25 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # affiliate.link.generate — AUTO-tier pure URL builder. No egress.
+    ts.register(
+        Tool(
+            name="affiliate.link.generate",
+            action="read_local_files",
+            fn=lambda merchant_url, campaign, source="midas", medium="referral",
+            content="", term="", extra_params=None: generate_affiliate_link(
+                merchant_url=merchant_url,
+                campaign=campaign,
+                source=source,
+                medium=medium,
+                content=content,
+                term=term,
+                extra_params=extra_params,
+            ).as_dict(),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+
     # email.send — APPROVE-tier SMTP send. Closes the outreach loop.
     ts.register(
         Tool(
