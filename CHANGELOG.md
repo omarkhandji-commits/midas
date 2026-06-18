@@ -7,6 +7,14 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`drain_due()` + `POST /api/scheduled-posts/drain` — close the scheduling loop.**
+  Drains pending posts whose `scheduled_at_iso` <= now by re-validating
+  intent through `plan_social_publish` and enqueuing a `send_social`
+  approval. Post transitions `pending → queued`. Honest: NO auto-egress —
+  the operator still resolves the approval before any network call.
+  A failed re-plan (e.g. media file deleted) marks the post `failed`
+  with the validation reason; nothing reaches the queue.
+
 - **Calendar page (`/calendar`).** 7-day grid view of `/api/scheduled-posts`.
   Monday-anchored, UTC, prev/this-week/next navigation, per-post status
   badge (pending/published/failed/cancelled), inline cancel button for

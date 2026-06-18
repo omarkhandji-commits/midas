@@ -11,7 +11,7 @@ type ScheduledPost = {
   account_handle: string;
   text: string;
   scheduled_at_iso: string;
-  status: "pending" | "published" | "failed" | "cancelled";
+  status: "pending" | "queued" | "published" | "failed" | "cancelled";
   media_paths: string[];
   created_at_iso: string;
   note: string;
@@ -40,6 +40,7 @@ function isoDay(d: Date): string {
 
 const STATUS_STYLES: Record<ScheduledPost["status"], string> = {
   pending: "border-accent bg-accent/10 text-ink",
+  queued: "border-amber-500 bg-amber-500/10 text-ink",
   published: "border-emerald-500 bg-emerald-500/10 text-ink",
   failed: "border-red-500 bg-red-500/10 text-ink",
   cancelled: "border-mute bg-rule-soft/40 text-mute line-through",

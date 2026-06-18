@@ -1869,6 +1869,34 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         )
         return _json(200, {"ok": True, "post": post.to_dict()})
 
+    @app.post("/api/scheduled-posts/drain")
+    def api_scheduled_posts_drain(request: Request) -> Response:
+        _require_session(request)
+        if deps.scheduled_posts is None or deps.queue is None:
+            return _json(503, {"error": "scheduled_posts or approvals not configured"})
+        from midas.flagship.agent.tools.social import plan_social_publish
+        from midas.flagship.scheduled_posts import drain_due
+
+        def _plan(**kwargs):
+            return plan_social_publish(deps.fs_guard, **kwargs)
+
+        outcome = drain_due(
+            deps.scheduled_posts,
+            approvals=deps.queue,
+            plan_fn=_plan,
+            run_id="dashboard-drain",
+        )
+        _receipt(
+            deps,
+            tool="scheduled_posts.drain",
+            inputs={},
+            outputs={
+                "enqueued": len(outcome.enqueued),
+                "failed": len(outcome.failed),
+            },
+        )
+        return _json(200, {"ok": True, "outcome": outcome.as_dict()})
+
     @app.delete("/api/scheduled-posts/{post_id}")
     def api_scheduled_posts_cancel(request: Request, post_id: str) -> Response:
         _require_session(request)

@@ -35,7 +35,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-ScheduledStatus = Literal["pending", "published", "failed", "cancelled"]
+ScheduledStatus = Literal["pending", "queued", "published", "failed", "cancelled"]
 
 
 def _utcnow_iso() -> str:
@@ -177,3 +177,90 @@ class ScheduledPostStore:
             json.dumps([r.to_dict() for r in rows], indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+
+
+@dataclass
+class DrainOutcome:
+    """Result of one drain pass over the pending queue."""
+
+    enqueued: list[str] = field(default_factory=list)  # post ids → approval queue
+    failed: list[tuple[str, str]] = field(default_factory=list)  # (post id, reason)
+    skipped_not_due: int = 0
+
+    def as_dict(self) -> dict:
+        return {
+            "enqueued": list(self.enqueued),
+            "failed": [{"id": pid, "reason": r} for pid, r in self.failed],
+            "skipped_not_due": self.skipped_not_due,
+            "enqueued_count": len(self.enqueued),
+            "failed_count": len(self.failed),
+        }
+
+
+def drain_due(
+    store: ScheduledPostStore,
+    *,
+    approvals,  # ApprovalQueue (duck-typed: needs .enqueue(...))
+    plan_fn,  # callable matching plan_social_publish signature
+    run_id: str = "drain",
+    now_iso: str | None = None,
+) -> DrainOutcome:
+    """Promote due pending posts into the approval queue.
+
+    For each pending post whose ``scheduled_at_iso`` <= now:
+      1. Re-validate intent via ``plan_fn`` (typically plan_social_publish).
+         If the post text/media no longer validates (e.g. media file was
+         deleted), mark the post ``failed`` with the validation reason.
+      2. Enqueue a ``send_social`` approval carrying the sha256-intent.
+      3. Mark the post ``published`` (the *intent* is published to the
+         queue — the operator still resolves before any egress).
+
+    Honest: we do NOT auto-approve. The post moves from "scheduled" to
+    "awaiting approval"; if the operator never resolves, no egress.
+    """
+    outcome = DrainOutcome()
+    due = store.due(now_iso=now_iso)
+    if not due:
+        return outcome
+
+    for post in due:
+        try:
+            plan = plan_fn(
+                platform=post.platform,
+                text=post.text,
+                account_handle=post.account_handle,
+                media_paths=list(post.media_paths),
+            )
+        except Exception as exc:  # noqa: BLE001 — record reason, continue queue
+            try:
+                store.mark(post.id, status="failed", note=str(exc)[:200])
+            except Exception:  # noqa: BLE001
+                pass
+            outcome.failed.append((post.id, str(exc)[:200]))
+            continue
+
+        sha = getattr(plan, "sha256_intent", "")
+        summary = f"Publish to {post.platform} ({post.account_handle}): {post.text[:120]}"
+        payload = {
+            "scheduled_post_id": post.id,
+            "platform": post.platform,
+            "account_handle": post.account_handle,
+            "text": post.text,
+            "media_paths": list(post.media_paths),
+            "sha256_intent": sha,
+        }
+        try:
+            approvals.enqueue(
+                run_id=run_id,
+                agent="scheduler",
+                tool="social.publish",
+                action="send_social",
+                summary=summary,
+                payload=payload,
+            )
+            store.mark(post.id, status="queued", note=f"sha256:{sha[:12]}")
+            outcome.enqueued.append(post.id)
+        except Exception as exc:  # noqa: BLE001
+            outcome.failed.append((post.id, str(exc)[:200]))
+
+    return outcome
