@@ -63,9 +63,21 @@ class EditFileChange:
 class EditPlan:
     kind: str = "code_edit"
     files: list[EditFileChange] = field(default_factory=list)
+    edits: list[dict[str, str]] = field(default_factory=list)
     total_old_lines: int = 0
     total_new_lines: int = 0
     total_net_delta: int = 0
+    sha256_intent: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class EditExecResult:
+    kind: str = "code_edit_exec"
+    files_written: list[str] = field(default_factory=list)
+    bytes_written: int = 0
     sha256_intent: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -180,9 +192,66 @@ def plan_code_edits(
 
     plan = EditPlan(
         files=files,
+        edits=[dict(e) for e in edits],  # canonical copy for execute-time replay
         total_old_lines=total_old,
         total_new_lines=total_new,
         total_net_delta=total_new - total_old,
         sha256_intent=_sha256("\n".join(intent_parts)),
     )
     return plan
+
+
+def execute_code_edits(
+    guard: FsGuard,
+    *,
+    payload: dict[str, Any],
+) -> EditExecResult:
+    """Re-apply the validated plan and write the files.
+
+    The payload is the plan dict returned by ``plan_code_edits``. We
+    rebuild the plan from the same ``edits`` list (which re-validates
+    every exact match) and verify the resulting ``sha256_intent``
+    matches the approved one. Any drift refuses the write.
+    """
+    edits = payload.get("edits")
+    if not isinstance(edits, list):
+        raise CodeEditError("execute_code_edits needs the original edits list")
+    approved_intent = str(payload.get("sha256_intent") or "")
+    if not approved_intent:
+        raise CodeEditError("execute_code_edits needs sha256_intent in payload")
+
+    fresh = plan_code_edits(guard, edits=edits)
+    if fresh.sha256_intent != approved_intent:
+        raise CodeEditError(
+            "intent hash drifted between approval and execute — refusing write. "
+            f"approved={approved_intent[:12]}…, fresh={fresh.sha256_intent[:12]}…"
+        )
+
+    # Re-derive the after-text per file (plan_code_edits is the only place that
+    # validates ordering) and write atomically.
+    by_file_after: dict[str, str] = {}
+    for raw in edits:
+        if not isinstance(raw, dict):
+            continue
+        fpath = str(raw["file"]).strip()
+        old = str(raw["old"])
+        new = str(raw["new"])
+        if fpath not in by_file_after:
+            target = guard.resolve(fpath)
+            by_file_after[fpath] = target.read_text(encoding="utf-8")
+        by_file_after[fpath] = by_file_after[fpath].replace(old, new, 1)
+
+    written: list[str] = []
+    total_bytes = 0
+    for fpath, after in by_file_after.items():
+        target = guard.resolve(fpath)
+        data = after.encode("utf-8")
+        target.write_bytes(data)
+        written.append(fpath)
+        total_bytes += len(data)
+
+    return EditExecResult(
+        files_written=written,
+        bytes_written=total_bytes,
+        sha256_intent=approved_intent,
+    )

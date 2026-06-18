@@ -7,6 +7,14 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`execute_code_edits` executor — Phase 6 step 3, closes the edit loop.**
+  Post-approval handler wired into the execute pipeline. Re-runs
+  `plan_code_edits` from the canonical `edits` list inside the
+  payload; if the resulting `sha256_intent` doesn't match the approved
+  one, the write is REFUSED (DENY receipt). On match, writes each
+  modified file atomically and emits an ALLOW receipt with
+  files_written + bytes_written.
+
 - **`code.edit_plan` tool — Phase 6 step 2, exact-match multi-file edits.**
   APPROVE-tier (`repo_write`). Input is a list of
   `{file, old, new}` edits; per edit, `old` MUST appear exactly once in

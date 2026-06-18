@@ -117,6 +117,39 @@ def _execute_web_automate(runtime: Any, request: ApprovalRequest) -> dict[str, A
     }
 
 
+def _execute_code_edit(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    """Post-approval multi-file edit. Re-validates exact-match, refuses drift."""
+    from .tools.code_edit import CodeEditError, execute_code_edits
+
+    payload = request.payload or {}
+    try:
+        result = execute_code_edits(runtime.fs_guard, payload=payload)
+    except CodeEditError as e:
+        runtime.append_receipt(
+            run_id=request.run_id,
+            agent="execute",
+            tool="code.edit_plan.failed",
+            inputs={"approval_id": request.id},
+            outputs={"error": str(e)},
+            decision=Decision.DENY,
+            taint_out=Taint.TRUSTED,
+        )
+        raise
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool="code.edit_plan.executed",
+        inputs={"approval_id": request.id},
+        outputs={
+            "files_written": result.files_written,
+            "bytes_written": result.bytes_written,
+        },
+        decision=Decision.ALLOW,
+        taint_out=Taint.TRUSTED,
+    )
+    return result.as_dict()
+
+
 def _execute_code_complex(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     """Post-approval Claude Code delegation. Failure is recorded as DENY."""
     from .tools.code_complex import CodeComplexError, execute_code_complex
@@ -538,6 +571,7 @@ _HANDLERS = {
     "social.publish": _execute_social_publish,
     "stripe.payment_link": _execute_stripe_payment_link,
     "code.complex": _execute_code_complex,
+    "code.edit_plan": _execute_code_edit,
     "web.automate": _execute_web_automate,
     "email.send": _execute_email_send,
 }

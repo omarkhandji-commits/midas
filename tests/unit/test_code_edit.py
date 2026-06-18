@@ -6,6 +6,7 @@ import pytest
 
 from midas.flagship.agent.tools.code_edit import (
     CodeEditError,
+    execute_code_edits,
     plan_code_edits,
 )
 from midas.flagship.agent.tools.fsguard import FsGuard
@@ -110,6 +111,40 @@ def test_refuses_missing_keys(tmp_path):
     (guard.workspace / "a.py").write_text("x", encoding="utf-8")
     with pytest.raises(CodeEditError, match="missing key 'new'"):
         plan_code_edits(guard, edits=[{"file": "a.py", "old": "x"}])
+
+
+def test_execute_writes_files(tmp_path):
+    guard = _guard(tmp_path)
+    (guard.workspace / "a.py").write_text("OLD\n", encoding="utf-8")
+    plan = plan_code_edits(
+        guard, edits=[{"file": "a.py", "old": "OLD", "new": "NEW"}],
+    )
+    result = execute_code_edits(guard, payload=plan.as_dict())
+    assert result.files_written == ["a.py"]
+    assert (guard.workspace / "a.py").read_text() == "NEW\n"
+
+
+def test_execute_refuses_on_intent_drift(tmp_path):
+    guard = _guard(tmp_path)
+    (guard.workspace / "a.py").write_text("OLD\n", encoding="utf-8")
+    plan = plan_code_edits(
+        guard, edits=[{"file": "a.py", "old": "OLD", "new": "NEW"}],
+    )
+    # Operator-approved plan, but the file changed underneath us.
+    (guard.workspace / "a.py").write_text("MUTATED\n", encoding="utf-8")
+    with pytest.raises(CodeEditError, match="not found"):
+        # The fresh re-plan errors first because 'OLD' is no longer there.
+        execute_code_edits(guard, payload=plan.as_dict())
+
+
+def test_execute_refuses_without_intent(tmp_path):
+    guard = _guard(tmp_path)
+    (guard.workspace / "a.py").write_text("x", encoding="utf-8")
+    with pytest.raises(CodeEditError, match="needs sha256_intent"):
+        execute_code_edits(
+            guard,
+            payload={"edits": [{"file": "a.py", "old": "x", "new": "y"}]},
+        )
 
 
 def test_multi_file_aggregation(tmp_path):
