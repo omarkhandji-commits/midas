@@ -13,6 +13,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("mcp", reason="optional MCP SDK not installed")
+
 from midas.core.approvals.queue import ApprovalQueue
 from midas.core.config.models import (
     ActionsPolicy,
