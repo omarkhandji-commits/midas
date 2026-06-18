@@ -41,6 +41,10 @@ def test_skill_registry_creates_safe_template(tmp_path: Path) -> None:
     skill_path = tmp_path / "skills" / manifest.name / "SKILL.md"
     assert skill_path.exists()
     assert manifest.permissions == ["read"]
+    assert manifest.path.endswith(manifest.name)
+    assert manifest.risk == "low"
+    assert manifest.enabled is True
+    assert manifest.last_reviewed
     assert registry.list()[0].sha256 == manifest.sha256
 
 

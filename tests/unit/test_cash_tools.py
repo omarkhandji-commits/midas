@@ -177,6 +177,10 @@ def test_landing_draft_queues_approval_does_not_write(tmp_path: Path) -> None:
     assert outcome.approval_id is not None
     assert outcome.verdict.decision.value == "queue_approval"
     assert not target.exists()  # critical: no write happened
+    queued = approvals.get(outcome.approval_id)
+    assert queued is not None
+    assert queued.payload["sha256_new"]
+    assert queued.payload["preview"].startswith("Cakes today")
 
 
 def test_product_draft_queues(tmp_path: Path) -> None:
@@ -191,6 +195,49 @@ def test_product_draft_queues(tmp_path: Path) -> None:
     )
     assert outcome.ran is False
     assert outcome.approval_id is not None
+
+
+def test_image_voice_and_stripe_queue_exact_planned_payloads(tmp_path: Path) -> None:
+    ts, approvals, _ = _make_toolset(tmp_path)
+    image = ts.invoke(
+        "image.draft",
+        agent="test",
+        path="hero.png",
+        prompt="MIDAS logo on a clean console",
+    )
+    voice = ts.invoke(
+        "voice.synthesize",
+        agent="test",
+        path="brief.wav",
+        text="Bonjour boss, voici le brief.",
+    )
+    stripe = ts.invoke(
+        "stripe.payment_link",
+        agent="test",
+        description="MIDAS setup",
+        amount_usd=49,
+        currency="USD",
+    )
+
+    for outcome, required in [
+        (image, ["sha256_new", "bytes_b64", "bytes_len"]),
+        (voice, ["sha256_new", "bytes_b64", "bytes_len"]),
+        (stripe, ["sha256_intent", "amount_minor", "currency"]),
+    ]:
+        assert outcome.approval_id is not None
+        req = approvals.get(outcome.approval_id)
+        assert req is not None
+        for key in required:
+            assert req.payload.get(key), (req.tool, key)
+
+
+def test_code_run_queues_code_hash(tmp_path: Path) -> None:
+    ts, approvals, _ = _make_toolset(tmp_path)
+    outcome = ts.invoke("code.run", agent="test", code="print('ok')")
+    assert outcome.approval_id is not None
+    req = approvals.get(outcome.approval_id)
+    assert req is not None
+    assert req.payload["code_sha256"] == hashlib.sha256(b"print('ok')").hexdigest()
 
 
 def test_outreach_sequence_queues(tmp_path: Path) -> None:

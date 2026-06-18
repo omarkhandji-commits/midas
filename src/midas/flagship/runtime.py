@@ -81,7 +81,7 @@ class Runtime:
     schedule_store: ScheduleStore
     scheduled_posts: ScheduledPostStore
     skill_registry: SkillRegistry
-    fs_guard: FsGuard | None = None
+    fs_guard: FsGuard
 
     @property
     def has_providers(self) -> bool:
@@ -97,7 +97,12 @@ class Runtime:
         outputs: object,
         decision: Decision = Decision.ALLOW,
         cost_usd: float = 0.0,
+        taint_in: Any = None,
+        taint_out: Any = None,
+        approval_id: str | None = None,
     ) -> None:
+        from midas.core.receipts.models import Taint
+
         self.ledger.append(
             run_id=run_id,
             agent=agent,
@@ -106,12 +111,13 @@ class Runtime:
             inputs=inputs,
             outputs=outputs,
             cost_usd=cost_usd,
+            taint_in=taint_in or Taint.TRUSTED,
+            taint_out=taint_out or Taint.TRUSTED,
+            approval_id=approval_id,
         )
 
     def build_toolset(self, *, run_id: str = "") -> Any:
         """Construct a Toolset wired with sentinel/ledger/approvals + the default tools."""
-        if self.fs_guard is None:
-            self.fs_guard = FsGuard.from_policy(self.base_dir, self.config.policy.filesystem)
         return build_default_toolset(
             sentinel=self.sentinel,
             guard=self.fs_guard,

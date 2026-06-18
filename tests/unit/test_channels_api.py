@@ -67,24 +67,24 @@ def test_channels_api_stores_telegram_without_echoing_token(tmp_path: Path) -> N
     client, token, ledger = _client(tmp_path)
     csrf = _sign_in(client, token)
     headers = {"origin": "http://testserver", "x-midas-csrf": csrf}
-    secret = "telegram-token-never-echoed"
+    canary_value = "telegram-canary-never-echoed"
 
     r = client.post(
         "/api/channels/telegram",
         headers=headers,
-        json={"bot_token": secret, "owner_chat_id": "42"},
+        json={"bot_token": canary_value, "owner_chat_id": "42"},
     )
 
     assert r.status_code == 200
-    assert secret not in r.text
+    assert canary_value not in r.text
     assert r.json()["channel"]["connected"] is True
     listed = client.get("/api/channels")
     assert listed.status_code == 200
-    assert secret not in listed.text
+    assert canary_value not in listed.text
     assert client.post("/api/channels/telegram/test", headers=headers).json()["ok"] is True
     receipts_json = "\n".join(receipt.model_dump_json() for receipt in ledger)
     assert "channels.telegram.connect" in receipts_json
-    assert secret not in receipts_json
+    assert canary_value not in receipts_json
 
     removed = client.request("DELETE", "/api/channels/telegram", headers=headers)
     assert removed.status_code == 200
@@ -95,25 +95,25 @@ def test_channels_api_stores_discord_and_slack_without_echoing_tokens(tmp_path: 
     client, token, _ledger = _client(tmp_path)
     csrf = _sign_in(client, token)
     headers = {"origin": "http://testserver", "x-midas-csrf": csrf}
-    discord_secret = "discord-token-never-echoed"
-    slack_secret = "slack-token-never-echoed"
+    discord_canary = "discord-canary-never-echoed"
+    slack_canary = "slack-canary-never-echoed"
 
     discord = client.post(
         "/api/channels/discord",
         headers=headers,
-        json={"bot_token": discord_secret, "owner_user_id": "u1", "guild_id": "g1"},
+        json={"bot_token": discord_canary, "owner_user_id": "u1", "guild_id": "g1"},
     )
     slack = client.post(
         "/api/channels/slack",
         headers=headers,
-        json={"bot_token": slack_secret, "owner_user_id": "u2", "signing_secret": "sig"},
+        json={"bot_token": slack_canary, "owner_user_id": "u2", "signing_secret": "sig"},
     )
 
     assert discord.status_code == 200
     assert slack.status_code == 200
     listed = client.get("/api/channels").text
-    assert discord_secret not in listed
-    assert slack_secret not in listed
+    assert discord_canary not in listed
+    assert slack_canary not in listed
     assert client.post("/api/channels/discord/test", headers=headers).json()["ok"] is True
     assert client.post("/api/channels/slack/test", headers=headers).json()["ok"] is True
 
@@ -124,15 +124,15 @@ def test_channels_api_stores_whatsapp_email_and_sms_without_echoing_secrets(
     client, token, _ledger = _client(tmp_path)
     csrf = _sign_in(client, token)
     headers = {"origin": "http://testserver", "x-midas-csrf": csrf}
-    whatsapp_secret = "whatsapp-token-never-echoed"
-    email_secret = "email-pass-never-echoed"
-    sms_secret = "sms-token-never-echoed"
+    whatsapp_canary = "whatsapp-canary-never-echoed"
+    email_canary = "email-canary-never-echoed"
+    sms_canary = "sms-canary-never-echoed"
 
     whatsapp = client.post(
         "/api/channels/whatsapp",
         headers=headers,
         json={
-            "access_token": whatsapp_secret,
+            "access_token": whatsapp_canary,
             "owner_phone": "+15550000001",
             "phone_number_id": "wa-phone-id",
         },
@@ -144,7 +144,7 @@ def test_channels_api_stores_whatsapp_email_and_sms_without_echoing_secrets(
             "owner_email": "owner@example.com",
             "smtp_host": "smtp.example.com",
             "smtp_user": "owner",
-            "smtp_pass": email_secret,
+            "smtp_pass": email_canary,
         },
     )
     sms = client.post(
@@ -152,7 +152,7 @@ def test_channels_api_stores_whatsapp_email_and_sms_without_echoing_secrets(
         headers=headers,
         json={
             "account_sid": "AC123",
-            "auth_token": sms_secret,
+            "auth_token": sms_canary,
             "from_number": "+15550000002",
             "owner_phone": "+15550000001",
         },
@@ -162,9 +162,9 @@ def test_channels_api_stores_whatsapp_email_and_sms_without_echoing_secrets(
     assert email.status_code == 200
     assert sms.status_code == 200
     listed = client.get("/api/channels").text
-    assert whatsapp_secret not in listed
-    assert email_secret not in listed
-    assert sms_secret not in listed
+    assert whatsapp_canary not in listed
+    assert email_canary not in listed
+    assert sms_canary not in listed
     assert client.post("/api/channels/whatsapp/test", headers=headers).json()["ok"] is True
     email_test = client.post("/api/channels/email/test", headers=headers).json()
     assert email_test["ok"] is True

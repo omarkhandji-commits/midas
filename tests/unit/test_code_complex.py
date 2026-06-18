@@ -92,8 +92,8 @@ def test_execute_scrubs_provider_keys_from_env(
 
     We capture the env that would have been passed by patching subprocess.run.
     """
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-do-not-leak")
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_live_do_not_leak")
+    monkeypatch.setenv("OPENAI_API_KEY", "provider-secret-placeholder")
+    monkeypatch.setenv("STRIPE_API_KEY", "stripe-secret-placeholder")
     monkeypatch.setenv("HOME", "/tmp/home")
     monkeypatch.setattr(
         "midas.flagship.agent.tools.code_complex.find_claude_cli",

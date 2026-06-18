@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -232,10 +233,8 @@ def drain_due(
                 media_paths=list(post.media_paths),
             )
         except Exception as exc:  # noqa: BLE001 — record reason, continue queue
-            try:
+            with suppress(Exception):
                 store.mark(post.id, status="failed", note=str(exc)[:200])
-            except Exception:  # noqa: BLE001
-                pass
             outcome.failed.append((post.id, str(exc)[:200]))
             continue
 

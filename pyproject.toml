@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "midas-agent"
 version = "0.0.1"
-description = "MIDAS — autonomous revenue operator: the business agent you can trust (receipts + budget fuse + sentinel)."
+description = "MIDAS is a local-first AI agent for approval-gated LLM workflows with receipts, budget controls, dashboard, CLI, Ollama, and MCP support."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "MIDAS" }]
-keywords = ["ai-agent", "autonomous-agent", "llm", "business", "self-hosted", "ollama", "local-first", "proof-first"]
+keywords = ["ai-agent", "llm-agent", "autonomous-agent", "self-hosted", "local-first", "ollama", "mcp", "approval-workflow", "audit-trail"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

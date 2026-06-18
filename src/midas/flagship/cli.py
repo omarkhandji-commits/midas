@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -12,10 +13,8 @@ import typer
 from midas.core.receipts.models import Decision
 
 if hasattr(sys.stdout, "reconfigure"):
-    try:
+    with suppress(Exception):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:  # noqa: BLE001 - best-effort console fix
-        pass
 
 app = typer.Typer(help="MIDAS - autonomous revenue operator.", no_args_is_help=True)
 approvals_app = typer.Typer(help="Review approval-gated actions.", no_args_is_help=True)
@@ -34,6 +33,9 @@ skills_app = typer.Typer(
 )
 media_app = typer.Typer(
     help="Inspect local PDFs, images, audio, and video safely.", no_args_is_help=True
+)
+capabilities_app = typer.Typer(
+    help="Inspect local tools and plan safe fallbacks.", no_args_is_help=True
 )
 voice_app = typer.Typer(
     help="Draft voice messages and approval-gated call plans.", no_args_is_help=True
@@ -58,6 +60,7 @@ app.add_typer(providers_app, name="providers")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(skills_app, name="skills")
 app.add_typer(media_app, name="media")
+app.add_typer(capabilities_app, name="capabilities")
 app.add_typer(voice_app, name="voice")
 app.add_typer(keys_app, name="keys")
 app.add_typer(proof_app, name="proof")
@@ -90,6 +93,159 @@ def version() -> None:
     from midas import __version__
 
     typer.echo(f"MIDAS {__version__}")
+
+
+@capabilities_app.command("scan")
+def capabilities_scan(json_output: bool = typer.Option(False, "--json")) -> None:
+    """Detect local free tools MIDAS can use. Never installs anything."""
+    from midas.flagship.capabilities import scan_capabilities
+
+    probes = scan_capabilities()
+    if json_output:
+        typer.echo(json.dumps({"capabilities": [p.as_dict() for p in probes]}, indent=2))
+        return
+    for probe in probes:
+        marker = "ok" if probe.status == "available" else "setup"
+        typer.echo(f"{marker:5} {probe.name:12} {probe.category:8} {probe.detail}")
+
+
+@capabilities_app.command("plan")
+def capabilities_plan(goal: str, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Explain the safest local/free path for a requested capability."""
+    from midas.flagship.capabilities import plan_capability
+
+    plan = plan_capability(goal)
+    if json_output:
+        typer.echo(json.dumps({"plan": plan.as_dict()}, indent=2))
+        return
+    typer.echo(f"Status: {plan.status}")
+    typer.echo(f"Primary: {plan.primary_path}")
+    typer.echo(f"Fallback: {plan.fallback_path}")
+    typer.echo(f"Approval required: {plan.approval_required}")
+    if plan.missing:
+        typer.echo(f"Missing: {', '.join(plan.missing)}")
+
+
+@app.command("repo-map")
+def repo_map(
+    subdir: str = typer.Argument(".", help="Workspace-relative directory to map."),
+    top: int = typer.Option(20, "--top", help="Number of ranked files to show."),
+    base_dir: str = typer.Option(".", "--base-dir", help="Workspace root."),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Build the lightweight code map used by the native coder."""
+    from midas.flagship.agent.tools.fsguard import FsGuard
+    from midas.flagship.agent.tools.repo_map import build_repo_map
+
+    guard = FsGuard(workspace=Path(base_dir).resolve())
+    result = build_repo_map(guard, subdir=subdir)
+    payload = {**result.as_dict(), "top": [f.to_dict() for f in result.top(n=top)]}
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    typer.echo(
+        f"Repo map: {result.file_count} Python files, "
+        f"{result.parse_errors} parse errors"
+    )
+    for entry in result.top(n=top):
+        typer.echo(f"{entry.score:>4.0f}  {entry.path}")
+
+
+@app.command("blog-lint")
+def blog_lint(
+    path: str = typer.Argument(..., help="Markdown file to lint."),
+    title: str = typer.Option("", "--title", help="Optional page title."),
+    meta_description: str = typer.Option("", "--meta", help="Optional meta description."),
+    site_domain: str = typer.Option("", "--site", help="Domain for internal link checks."),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Run the deterministic SEO checklist on a Markdown post."""
+    from midas.flagship.agent.tools.blog_seo import lint_blog
+
+    markdown = Path(path).read_text(encoding="utf-8")
+    result = lint_blog(
+        markdown=markdown,
+        title=title,
+        meta_description=meta_description,
+        site_domain=site_domain,
+    )
+    payload = result.to_dict()
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    typer.echo(f"SEO score: {result.score}/100")
+    for issue in result.issues:
+        typer.echo(f"{issue.severity:6} {issue.code}: {issue.message}")
+
+
+@app.command("course")
+def course(
+    topic: str = typer.Argument(..., help="Course topic."),
+    audience: str = typer.Option("beginners", "--audience", "-a", help="Target audience."),
+    modules: int = typer.Option(5, "--modules", "-m", help="Number of modules."),
+    objective: Annotated[
+        list[str] | None,
+        typer.Option("--objective", "-o", help="Learning objective; repeatable."),
+    ] = None,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Draft a structured course outline."""
+    from midas.flagship.agent.tools.course import plan_course_outline
+
+    result = plan_course_outline(
+        topic=topic,
+        audience=audience,
+        n_modules=modules,
+        learning_objectives=objective or [],
+    )
+    if json_output:
+        typer.echo(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        return
+    typer.echo(result.markdown)
+
+
+@app.command("drain")
+def drain(
+    now_iso: str | None = typer.Option(
+        None,
+        "--now",
+        help="UTC ISO timestamp for deterministic draining; defaults to now.",
+    ),
+    base_dir: str = typer.Option(".", "--base-dir", help="Project dir holding config/."),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Move due scheduled posts into the approval queue. Never auto-publishes."""
+    from midas.flagship.agent.tools.social import plan_social_publish
+    from midas.flagship.runtime import build_runtime
+    from midas.flagship.scheduled_posts import drain_due
+
+    rt = build_runtime(base_dir)
+
+    def _plan(**kwargs: Any) -> Any:
+        return plan_social_publish(rt.fs_guard, **kwargs)
+
+    outcome = drain_due(
+        rt.scheduled_posts,
+        approvals=rt.approvals,
+        plan_fn=_plan,
+        run_id="cli:drain",
+        now_iso=now_iso,
+    )
+    rt.append_receipt(
+        run_id="cli:drain",
+        agent="cli",
+        tool="scheduled_posts.drain",
+        inputs={"now_iso": now_iso},
+        outputs=outcome.as_dict(),
+    )
+    payload = outcome.as_dict()
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    typer.echo(
+        f"Queued {payload['enqueued_count']} due post(s); "
+        f"failed {payload['failed_count']}."
+    )
 
 
 @app.command()
@@ -204,13 +360,11 @@ def _launch_console(
     if show_link:
         typer.echo(f"Direct link: {magic}")
     if open_browser:
-        try:
+        with suppress(Exception):
             import threading
             import webbrowser
 
             threading.Timer(0.6, lambda: webbrowser.open(magic)).start()
-        except Exception:  # noqa: BLE001 — never let browser failure crash the server
-            pass
     typer.echo("Press Ctrl+C to stop.")
     uvicorn.run(create_app(deps, bind_host=host), host=host, port=port, log_level="warning")
 
@@ -294,13 +448,11 @@ def up(
         typer.echo("Telegram listener: not configured")
     else:
         typer.echo("Telegram listener: configured")
-    try:
+    with suppress(Exception):
         import threading
         import webbrowser
 
         threading.Timer(0.6, lambda: webbrowser.open(magic)).start()
-    except Exception:  # noqa: BLE001
-        pass
 
     async def _serve() -> None:
         tasks = []

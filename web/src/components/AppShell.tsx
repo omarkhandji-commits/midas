@@ -5,9 +5,12 @@ import {
   ClipboardCheck,
   Compass,
   Wand2,
+  Newspaper,
+  GraduationCap,
   Inbox,
   ScrollText,
   Brain,
+  Users,
   Radar,
   LineChart,
   Plug,
@@ -20,7 +23,7 @@ import {
   FileBox,
   BookOpen,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 
 type NavItem = { to: string; label: string; icon: typeof MessageSquare };
 type NavGroup = { label: string; items: NavItem[] };
@@ -34,6 +37,9 @@ const groups: NavGroup[] = [
       { to: "/", label: "Chat", icon: MessageSquare },
       { to: "/missions", label: "Missions", icon: Compass },
       { to: "/assets", label: "Asset Studio", icon: Wand2 },
+      { to: "/blogs", label: "Blogs", icon: Newspaper },
+      { to: "/courses", label: "Courses", icon: GraduationCap },
+      { to: "/newsletters", label: "Newsletters", icon: ScrollText },
       { to: "/artifacts", label: "Artifacts", icon: FileBox },
       { to: "/approvals", label: "Approvals", icon: Inbox },
     ],
@@ -42,8 +48,10 @@ const groups: NavGroup[] = [
     label: "Verify",
     items: [
       { to: "/proofs", label: "Proof Ledger", icon: ScrollText },
+      { to: "/leads", label: "Leads", icon: Users },
       { to: "/memory", label: "Memory", icon: Brain },
       { to: "/outcomes", label: "Outcomes", icon: LineChart },
+      { to: "/cohorts", label: "Cohorts", icon: LineChart },
     ],
   },
   {
@@ -96,9 +104,9 @@ export function AppShell() {
       <header className="col-span-2 sticky top-0 z-10 flex items-baseline justify-between gap-6 border-b border-rule bg-paper px-8 py-3">
         <div className="flex items-baseline gap-3">
           <img
-            src="/static/app/midas-mark.svg"
+            src="/static/app/midas-agent.png"
             alt=""
-            className="size-7 self-center"
+            className="size-8 self-center object-contain"
             aria-hidden="true"
           />
           <span className="font-display text-[22px] font-medium tracking-[0.02em]">MIDAS</span>
@@ -106,8 +114,22 @@ export function AppShell() {
             operator
           </span>
         </div>
-        <div className="flex items-baseline gap-6 font-mono text-xs text-mute">
-          <MetaPill label="Spent" value={`$${snapshot.spent_usd.toFixed(4)}`} id="spent-usd" />
+        <div className="flex items-center gap-4 font-mono text-xs text-mute">
+          <NavLink
+            to="/"
+            className="inline-flex items-center gap-1.5 border border-accent bg-accent px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-paper"
+          >
+            <MessageSquare className="size-3.5" aria-hidden />
+            Chat
+          </NavLink>
+          <NavLink
+            to="/start"
+            className="inline-flex items-center gap-1.5 border border-rule px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-ink hover:border-accent"
+          >
+            <ClipboardCheck className="size-3.5" aria-hidden />
+            Setup
+          </NavLink>
+          <MetaPill label="Spent" value={formatCurrency(snapshot.spent_usd)} id="spent-usd" />
           <MetaPill label="Receipts" value={String(snapshot.receipts)} id="receipt-count" />
           <MetaPill label="Pending" value={String(snapshot.pending)} id="pending-count" />
           <span className="inline-flex items-center gap-1.5 text-accent">

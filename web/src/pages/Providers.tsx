@@ -128,6 +128,14 @@ export function ProvidersPage() {
               Paste a key or local endpoint once. MIDAS stores it in the OS keychain,
               forwards only status to the browser, and keeps raw secrets out of model context.
             </p>
+            <div className="mt-4 border border-rule bg-rule-soft/35 p-3 text-sm text-mute">
+              <p className="font-medium text-ink">Button guide</p>
+              <p className="mt-1">
+                Save to keychain stores the key locally. Test checks that MIDAS can call
+                the provider. Refresh rereads local status. Remove deletes the saved
+                connection.
+              </p>
+            </div>
           </CardBody>
           <form className="mt-6 grid gap-4" onSubmit={saveProvider}>
             <label className="grid gap-1.5 text-sm font-medium">

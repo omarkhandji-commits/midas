@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 
 type Recipe = {
   name: string;
@@ -249,7 +249,7 @@ export function SchedulePage() {
                     <RunStatusBadge status={row.status} />
                     <span className="font-mono text-xs text-ink">{row.run_id}</span>
                     <span className="font-mono text-[10px] text-mute">
-                      {row.receipts} receipts · ${row.cost_usd.toFixed(4)}
+                      {row.receipts} receipts · {formatCurrency(row.cost_usd)}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-mute">

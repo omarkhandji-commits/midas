@@ -1,15 +1,15 @@
 # Default owner for every file in the repository.
-# Update <owner> after the first push.
-* @<owner>
+# Keep ownership explicit for public review.
+* @omarkhandji-commits
 
-# Security-critical areas — review required.
-/src/midas/core/sentinel/   @<owner>
-/src/midas/core/receipts/   @<owner>
-/src/midas/core/budget/     @<owner>
-/src/midas/core/approvals/  @<owner>
-/src/midas/flagship/agent/tools/code.py     @<owner>
-/src/midas/flagship/agent/tools/fsguard.py  @<owner>
-/src/midas/flagship/mcp/    @<owner>
-/tools/verify/              @<owner>
-/config/policy.yml          @<owner>
-/.github/workflows/         @<owner>
+# Security-critical areas require owner review.
+/src/midas/core/sentinel/   @omarkhandji-commits
+/src/midas/core/receipts/   @omarkhandji-commits
+/src/midas/core/budget/     @omarkhandji-commits
+/src/midas/core/approvals/  @omarkhandji-commits
+/src/midas/flagship/agent/tools/code.py     @omarkhandji-commits
+/src/midas/flagship/agent/tools/fsguard.py  @omarkhandji-commits
+/src/midas/flagship/mcp/    @omarkhandji-commits
+/tools/verify/              @omarkhandji-commits
+/config/policy.yml          @omarkhandji-commits
+/.github/workflows/         @omarkhandji-commits

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from midas.core.agents import Tool, Toolset
 from midas.core.approvals.queue import ApprovalQueue
 from midas.core.config.models import (
     ActionsPolicy,
@@ -16,7 +17,7 @@ from midas.core.config.models import (
     SpendCaps,
 )
 from midas.core.receipts import ReceiptLedger, Signer
-from midas.core.receipts.models import Decision
+from midas.core.receipts.models import Decision, Taint
 from midas.core.sentinel import Sentinel
 from midas.flagship.agent import AgentLoop, build_default_toolset
 from midas.flagship.agent.loop import AgentTranscript
@@ -149,3 +150,38 @@ def test_loop_unknown_tool_denied_by_toolset(tmp_path: Path) -> None:
     t = loop_.run("rogue")
     assert t.steps[0].decision == "deny"
     assert "no.such.tool" in (t.steps[0].error or "")
+
+
+def test_loop_propagates_untrusted_taint_to_later_tools(tmp_path: Path) -> None:
+    policy = _policy().model_copy(update={"egress_allowlist": ["api.good.test"]})
+    toolset = Toolset(Sentinel(policy))
+    toolset.register(
+        Tool(
+            "read.untrusted",
+            action="read_local_files",
+            fn=lambda: {"text": "web data"},
+            output_taint=Taint.UNTRUSTED,
+        )
+    )
+    toolset.register(
+        Tool(
+            "private.egress",
+            action="read_local_files",
+            fn=lambda: {"ok": True},
+            has_private_access=True,
+            has_egress=True,
+            egress_domains=["api.good.test"],
+        )
+    )
+
+    def _plan(task: str, transcript: AgentTranscript):  # noqa: ARG001
+        if not transcript.steps:
+            return {"tool": "read.untrusted", "inputs": {}}
+        return {"tool": "private.egress", "inputs": {}}
+
+    loop = AgentLoop(toolset=toolset, planner=_plan, max_steps=3)
+    transcript = loop.run("try exfil")
+    assert transcript.steps[0].decision == "allow"
+    assert transcript.steps[0].output_taint == Taint.UNTRUSTED.value
+    assert transcript.steps[1].decision == "deny"
+    assert "lethal trifecta" in (transcript.steps[1].error or "")

@@ -40,6 +40,27 @@ def test_reject_closes_request(tmp_path: Path) -> None:
     assert out.note == "not yet"
 
 
+def test_enqueue_adds_review_metadata_without_touching_payload(tmp_path: Path) -> None:
+    q = _queue(tmp_path)
+    req = q.enqueue(
+        run_id="r",
+        agent="a",
+        tool="stripe.payment_link",
+        action="publish_public",
+        summary="x",
+        payload={"sha256_intent": "a" * 64},
+        estimated_cost_usd=0.02,
+    )
+
+    stored = q.get(req.id)
+
+    assert stored is not None
+    assert stored.payload == {"sha256_intent": "a" * 64}
+    assert stored.risk == "money"
+    assert stored.estimated_cost_usd == 0.02
+    assert stored.expires_ts is not None
+
+
 def test_double_resolve_is_rejected(tmp_path: Path) -> None:
     q = _queue(tmp_path)
     req = q.enqueue(run_id="r", agent="a", tool="t", action="send_email", summary="x")

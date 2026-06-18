@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 
 type DashboardSettings = {
   per_task_cap: number;
@@ -164,8 +164,8 @@ export function SettingsPage() {
             <p>{modeCopy(settings.autonomy)}</p>
           </CardBody>
           <div className="mt-5 grid gap-3 text-sm">
-            <SettingSignal icon={Gauge} label="Per task" value={`$${settings.per_task_cap}`} />
-            <SettingSignal icon={ShieldCheck} label="Daily" value={`$${settings.daily_cap}`} />
+            <SettingSignal icon={Gauge} label="Per task" value={formatCurrency(settings.per_task_cap)} />
+            <SettingSignal icon={ShieldCheck} label="Daily" value={formatCurrency(settings.daily_cap)} />
             <SettingSignal icon={Moon} label="Theme" value={settings.theme} />
             <SettingSignal icon={Languages} label="Language" value={settings.language.toUpperCase()} />
           </div>

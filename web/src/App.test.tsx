@@ -40,8 +40,8 @@ describe("AppShell", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("First value in five minutes")).toBeInTheDocument();
-    expect(screen.getByText("Connect your AI")).toBeInTheDocument();
-    expect(screen.getByText("Approval-default")).toBeInTheDocument();
+    expect(screen.getByText("Set up MIDAS without the terminal")).toBeInTheDocument();
+    expect(screen.getAllByText("Choose the AI MIDAS will use").length).toBeGreaterThan(0);
+    expect(screen.getByText("You stay in control")).toBeInTheDocument();
   });
 });

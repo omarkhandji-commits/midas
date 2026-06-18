@@ -58,6 +58,54 @@ def test_guard_commits_estimate_when_actual_unset(tmp_path: Path) -> None:
     assert abs(store.total(task_id="t2") - 0.07) < 1e-9
 
 
+def test_per_skill_cap_blocks_specific_skill(tmp_path: Path) -> None:
+    store = SpendStore(tmp_path / "spend.db")
+    fuse = BudgetFuse(
+        store,
+        Caps(per_task=10.0, daily=10.0, monthly=10.0, per_skill={"video": 0.20}),
+    )
+    fuse.commit(0.15, skill="video")
+    with pytest.raises(BudgetExceeded) as exc:
+        fuse.check(0.10, skill="video")
+    assert exc.value.scope == "skill:video"
+
+
+def test_per_persona_cap_blocks_specific_persona(tmp_path: Path) -> None:
+    store = SpendStore(tmp_path / "spend.db")
+    fuse = BudgetFuse(
+        store,
+        Caps(
+            per_task=10.0,
+            daily=10.0,
+            monthly=10.0,
+            per_persona={"creator": 0.25},
+        ),
+    )
+    with pytest.raises(BudgetExceeded) as exc:
+        with fuse.guard(0.30, persona="creator"):
+            pass
+    assert exc.value.scope == "persona:creator"
+
+
+def test_budget_projection_reports_active_caps(tmp_path: Path) -> None:
+    store = SpendStore(tmp_path / "spend.db")
+    fuse = BudgetFuse(
+        store,
+        Caps(
+            per_task=1.0,
+            daily=2.0,
+            monthly=10.0,
+            per_skill={"voice": 0.50},
+        ),
+    )
+    fuse.commit(0.20, task_id="t1", skill="voice")
+
+    projected = fuse.project(0.20, task_id="t1", skill="voice")
+
+    assert projected["per_task"]["projected"] == pytest.approx(0.40)
+    assert projected["skill:voice"]["ok"] is True
+
+
 def test_spend_persists_across_reopen(tmp_path: Path) -> None:
     db = tmp_path / "spend.db"
     BudgetFuse(SpendStore(db), _caps()).commit(0.5)

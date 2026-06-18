@@ -2,13 +2,18 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { CapabilitiesPage } from "@/pages/Capabilities";
+import { BlogsPage } from "@/pages/Blogs";
 import { ChatPage } from "@/pages/Chat";
+import { CohortsPage } from "@/pages/Cohorts";
+import { CoursesPage } from "@/pages/Courses";
 import { MissionsPage } from "@/pages/Missions";
 import { ArtifactsPage } from "@/pages/Artifacts";
 import { AssetsPage } from "@/pages/Assets";
 import { ApprovalsPage } from "@/pages/Approvals";
 import { ProofsPage } from "@/pages/Proofs";
+import { LeadsPage } from "@/pages/Leads";
 import { MemoryPage } from "@/pages/Memory";
+import { NewslettersPage } from "@/pages/Newsletters";
 import { OutcomesPage } from "@/pages/Outcomes";
 import { ChannelsPage } from "@/pages/Channels";
 import { ConnectionsPage } from "@/pages/Connections";
@@ -33,11 +38,16 @@ const router = createBrowserRouter([
       { index: true, element: <ChatPage /> },
       { path: "missions", element: <MissionsPage /> },
       { path: "assets", element: <AssetsPage /> },
+      { path: "blogs", element: <BlogsPage /> },
+      { path: "courses", element: <CoursesPage /> },
+      { path: "newsletters", element: <NewslettersPage /> },
       { path: "artifacts", element: <ArtifactsPage /> },
       { path: "approvals", element: <ApprovalsPage /> },
       { path: "proofs", element: <ProofsPage /> },
+      { path: "leads", element: <LeadsPage /> },
       { path: "memory", element: <MemoryPage /> },
       { path: "outcomes", element: <OutcomesPage /> },
+      { path: "cohorts", element: <CohortsPage /> },
       { path: "connections", element: <ConnectionsPage /> },
       { path: "channels", element: <ChannelsPage /> },
       { path: "providers", element: <ProvidersPage /> },

@@ -42,6 +42,13 @@ from .tools.cash import (
     plan_proposal,
     plan_quote,
 )
+from .tools.cash_ops import (
+    build_upsell_sequence,
+    compute_cohort_retention,
+    compute_referral_payout,
+    generate_referral_code,
+    transition_customer_lifecycle,
+)
 from .tools.code import plan_code_run
 from .tools.code_complex import plan_code_complex
 from .tools.code_edit import plan_code_edits
@@ -58,11 +65,22 @@ from .tools.image import plan_image
 from .tools.lead import record_leads
 from .tools.newsletter import plan_newsletter
 from .tools.pdf import pdf_extract
+from .tools.pod import plan_pod_product_spec, plan_pod_publish_draft
 from .tools.repo_map import build_repo_map
 from .tools.sheet import plan_sheet_write, sheet_read
 from .tools.skill import skill_index, skill_load
 from .tools.social import plan_social_publish
-from .tools.stripe_pay import plan_payment_link
+from .tools.stripe_pay import (
+    plan_payment_link,
+    plan_stripe_price_draft,
+    plan_stripe_product_draft,
+)
+from .tools.video import (
+    plan_remotion_project,
+    plan_remotion_render,
+    plan_video_script,
+    plan_video_storyboard,
+)
 from .tools.voice_synth import plan_voice_synth
 from .tools.web_automate import plan_web_automate
 from .tools.web_scrape import _as_tool_payload as _scrape_payload
@@ -315,6 +333,62 @@ def build_default_toolset(
                 ).to_dict()
             ),
             output_taint=Taint.TRUSTED,
+        )
+    )
+
+    ts.register(
+        Tool(
+            name="video.script",
+            action="read_local_files",
+            fn=lambda title, audience="operators", goal="explain the offer clearly",
+            duration_seconds=30: plan_video_script(
+                title=title,
+                audience=audience,
+                goal=goal,
+                duration_seconds=int(duration_seconds),
+            ).to_dict(),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="video.storyboard",
+            action="read_local_files",
+            fn=lambda script, aspect="9:16": plan_video_storyboard(script, aspect=aspect),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="remotion.project.draft",
+            action="repo_write",
+            fn=lambda path, title, script_markdown, aspect="9:16",
+            logo_path="web/public/midas-agent.png": _as_dict(
+                plan_remotion_project(
+                    guard,
+                    path,
+                    title=title,
+                    script_markdown=script_markdown,
+                    aspect=aspect,
+                    logo_path=logo_path,
+                )
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="remotion.render",
+            action="execute_code",
+            fn=lambda project_zip, output_path, composition_id="Main": _as_dict(
+                plan_remotion_render(
+                    guard,
+                    project_zip=project_zip,
+                    output_path=output_path,
+                    composition_id=composition_id,
+                )
+            ),
+            output_taint=Taint.UNTRUSTED,
         )
     )
 
@@ -620,6 +694,9 @@ def build_default_toolset(
                             "summary": e.summary,
                             "permissions": e.permissions,
                             "sha256": e.sha256,
+                            "risk": getattr(e, "risk", "low"),
+                            "tags": getattr(e, "tags", []) or [],
+                            "enabled": getattr(e, "enabled", True),
                         }
                         for e in skill_index(skill_registry)
                     ]
@@ -658,6 +735,138 @@ def build_default_toolset(
     )
 
     # social.publish — approval-gated, egress at execute time only.
+    ts.register(
+        Tool(
+            name="stripe.product.draft",
+            action="publish_public",
+            fn=lambda name, description="", images=None, metadata=None: _as_dict(
+                plan_stripe_product_draft(
+                    name=name,
+                    description=description,
+                    images=images,
+                    metadata=metadata,
+                )
+            ),
+            output_taint=Taint.UNTRUSTED,
+            has_egress=True,
+        )
+    )
+    ts.register(
+        Tool(
+            name="stripe.price.draft",
+            action="publish_public",
+            fn=lambda product, unit_amount, currency="USD", recurring_interval=None,
+            lookup_key="", metadata=None: _as_dict(
+                plan_stripe_price_draft(
+                    product=product,
+                    unit_amount=float(unit_amount),
+                    currency=currency,
+                    recurring_interval=recurring_interval,
+                    lookup_key=lookup_key,
+                    metadata=metadata,
+                )
+            ),
+            output_taint=Taint.UNTRUSTED,
+            has_egress=True,
+        )
+    )
+    ts.register(
+        Tool(
+            name="pod.product_spec",
+            action="repo_write",
+            fn=lambda path, title, design_path, retail_price, estimated_cost,
+            mockup_url="", variants=None, provider="printful": _as_dict(
+                plan_pod_product_spec(
+                    guard,
+                    path,
+                    title=title,
+                    design_path=design_path,
+                    mockup_url=mockup_url,
+                    variants=variants,
+                    retail_price=float(retail_price),
+                    estimated_cost=float(estimated_cost),
+                    provider=provider,
+                )
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="pod.publish_draft",
+            action="publish_public",
+            fn=lambda product_spec, provider="printful": _as_dict(
+                plan_pod_publish_draft(product_spec=product_spec, provider=provider)
+            ),
+            output_taint=Taint.UNTRUSTED,
+            has_egress=True,
+        )
+    )
+    ts.register(
+        Tool(
+            name="referral.code.generate",
+            action="read_local_files",
+            fn=lambda customer_key, prefix="MIDAS", commission_rate=0.10: (
+                generate_referral_code(
+                    customer_key,
+                    prefix=prefix,
+                    commission_rate=float(commission_rate),
+                ).as_dict()
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="referral.payout.compute",
+            action="read_local_files",
+            fn=lambda code, attributed_revenue, commission_rate: (
+                compute_referral_payout(
+                    code,
+                    attributed_revenue=float(attributed_revenue),
+                    commission_rate=float(commission_rate),
+                ).as_dict()
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="customer.lifecycle.transition",
+            action="read_local_files",
+            fn=lambda customer_key, status, previous_status="", reason="": (
+                transition_customer_lifecycle(
+                    customer_key,
+                    status=status,
+                    previous_status=previous_status,
+                    reason=reason,
+                ).as_dict()
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="upsell.sequence",
+            action="read_local_files",
+            fn=lambda product, next_offer, customer_segment="", days=None: build_upsell_sequence(
+                product=product,
+                customer_segment=customer_segment,
+                next_offer=next_offer,
+                days=days,
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+    ts.register(
+        Tool(
+            name="cohort.analytics",
+            action="read_local_files",
+            fn=lambda events: compute_cohort_retention(events).as_dict(),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+
     # Action ``publish_public`` is in the default policy's requires_approval set.
     # Output is UNTRUSTED: the platform's API response is data, not instructions.
     ts.register(
@@ -708,6 +917,9 @@ def build_default_toolset(
             has_egress=True,  # openai backend egresses; offline does not
         )
     )
+    for name in _APPROVAL_PLANNER_TOOLS:
+        if name in ts._tools:  # noqa: SLF001 - registry owns tool construction
+            ts._tools[name].prepares_approval_payload = True  # noqa: SLF001
     return ts
 
 
@@ -717,3 +929,39 @@ def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {"value": value}
+
+
+_APPROVAL_PLANNER_TOOLS = {
+    "fs.write",
+    "sheet.write",
+    "artifact.text",
+    "email.draft",
+    "pdf.draft",
+    "invoice.draft",
+    "voice.draft",
+    "code.draft",
+    "json.write",
+    "csv.write",
+    "code.edit_plan",
+    "remotion.project.draft",
+    "email.send",
+    "web.automate",
+    "docx.draft",
+    "code.complex",
+    "code.run",
+    "landing.draft",
+    "product.draft",
+    "outreach.sequence",
+    "proposal.draft",
+    "quote.draft",
+    "adcopy.draft",
+    "stripe.payment_link",
+    "stripe.product.draft",
+    "stripe.price.draft",
+    "pod.product_spec",
+    "pod.publish_draft",
+    "remotion.render",
+    "social.publish",
+    "voice.synthesize",
+    "image.draft",
+}

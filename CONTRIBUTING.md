@@ -5,7 +5,7 @@ Thank you for considering a contribution.
 ## Development Setup
 
 ```bash
-git clone https://github.com/<owner>/midas.git
+git clone https://github.com/omarkhandji-commits/midas.git
 cd midas
 python -m venv .venv
 .venv/bin/pip install -e ".[llm,web,dev]"

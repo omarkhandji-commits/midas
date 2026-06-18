@@ -49,7 +49,7 @@ type MissionResult = { ok: boolean; mission?: unknown };
 type Step = 1 | 2 | 3 | 4;
 
 const STEPS: { id: Step; title: string; subtitle: string; icon: typeof KeyRound }[] = [
-  { id: 1, title: "Connect your model", subtitle: "Local Ollama or one API key", icon: KeyRound },
+  { id: 1, title: "Connect your AI", subtitle: "Local Ollama or one API key", icon: KeyRound },
   { id: 2, title: "Choose a notification path", subtitle: "Optional", icon: Plug },
   { id: 3, title: "How Midas works", subtitle: "Read once, drives every action", icon: Sparkles },
   { id: 4, title: "Your first action", subtitle: "A real cash move", icon: Compass },
@@ -85,12 +85,13 @@ export function OnboardingPage() {
         <Card className="p-6">
           <CardHeader>
             <CardKicker>Start</CardKicker>
-            <CardTitle>Get ready in four short steps</CardTitle>
+            <CardTitle>Set up MIDAS without the terminal</CardTitle>
           </CardHeader>
           <CardBody className="max-w-none">
             <p>
-              Set a model, pick how you want to be notified, then run one real action.
-              Every step that touches the outside world waits for your approval first.
+              Start here if you are not a developer. Choose the AI MIDAS will use,
+              optionally connect a notification channel, then launch your first mission.
+              Anything risky stops for your approval first.
             </p>
           </CardBody>
         </Card>
@@ -98,12 +99,12 @@ export function OnboardingPage() {
         <Card className="p-5">
           <CardHeader>
             <CardKicker>Invariant</CardKicker>
-            <CardTitle>Approval-default</CardTitle>
+            <CardTitle>You stay in control</CardTitle>
           </CardHeader>
           <CardBody>
             <p>
-              Public posts, money movement, outbound messages, and file writes always
-              pause for your click. Midas drafts; you approve; Midas acts.
+              MIDAS can read, think, draft, and plan. It does not send, publish, spend,
+              write files, or run code until you approve the action card.
             </p>
           </CardBody>
         </Card>
@@ -162,7 +163,6 @@ function StepBrain({ onDone }: { onDone: () => void }) {
   const [detect, setDetect] = useState<DetectResult | null>(null);
   const [detecting, setDetecting] = useState(true);
   const [apiKey, setApiKey] = useState("");
-  const [chosenProvider, setChosenProvider] = useState<string>("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -192,7 +192,6 @@ function StepBrain({ onDone }: { onDone: () => void }) {
       setError("This key prefix is not recognized. Paste an OpenAI, Anthropic, OpenRouter, Groq, or Google key.");
       return;
     }
-    setChosenProvider(guess);
     setBusy(true);
     try {
       const added = await api.post<ProviderAddResult>("/api/providers", {
@@ -225,7 +224,7 @@ function StepBrain({ onDone }: { onDone: () => void }) {
     <Card className="p-6">
       <CardHeader>
         <CardKicker>Step 1</CardKicker>
-        <CardTitle>Connect your model</CardTitle>
+        <CardTitle>Choose the AI MIDAS will use</CardTitle>
       </CardHeader>
       <CardBody>
         {detecting ? (
@@ -239,11 +238,11 @@ function StepBrain({ onDone }: { onDone: () => void }) {
                 Local model detected: <code className="font-mono text-accent">ollama/{detect.chosen}</code>
               </p>
               <p className="mt-1 text-xs text-mute">
-                Runs on your machine. No key, no token cost. Recommended for first use.
+                Runs on your machine. No key, no token cost. Best first choice when available.
               </p>
             </div>
             <Button variant="primary" onClick={useLocal}>
-              Use this
+              Continue with local AI
               <ChevronRight className="size-4" aria-hidden />
             </Button>
           </div>
@@ -275,6 +274,14 @@ function StepBrain({ onDone }: { onDone: () => void }) {
               </span>
             )}
           </label>
+          <div className="border border-rule bg-rule-soft/35 p-3 text-sm text-mute">
+            <p className="font-medium text-ink">What is an API key?</p>
+            <p className="mt-1">
+              It is the password that lets MIDAS talk to an AI provider. MIDAS stores
+              it locally and never shows it back in the browser. You can remove it
+              later from Providers.
+            </p>
+          </div>
           <div className="flex flex-wrap gap-2">
             <Button
               variant="primary"
@@ -287,12 +294,12 @@ function StepBrain({ onDone }: { onDone: () => void }) {
                 </>
               ) : (
                 <>
-                  <Bot className="size-4" aria-hidden /> Connect{chosenProvider ? ` ${chosenProvider}` : ""}
+                  <Bot className="size-4" aria-hidden /> Save key and test
                 </>
               )}
             </Button>
             <Button variant="ghost" asChild>
-              <Link to="/providers">More options</Link>
+              <Link to="/providers">Advanced provider settings</Link>
             </Button>
           </div>
         </div>
@@ -334,7 +341,7 @@ function StepChannel({ onDone, onSkip }: { onDone: () => void; onSkip: () => voi
     <Card className="p-6">
       <CardHeader>
         <CardKicker>Step 2</CardKicker>
-        <CardTitle>Pick how you want to be notified</CardTitle>
+        <CardTitle>Connect notifications, or skip</CardTitle>
       </CardHeader>
       <CardBody>
         <p className="text-sm text-mute">
@@ -367,7 +374,7 @@ function StepChannel({ onDone, onSkip }: { onDone: () => void; onSkip: () => voi
         )}
         <div className="mt-5 flex flex-wrap gap-2">
           <Button asChild variant="primary">
-            <Link to="/channels">Open the Channels page</Link>
+            <Link to="/channels">Set up notifications</Link>
           </Button>
           <Button onClick={hasOne ? onDone : onSkip} variant={hasOne ? "primary" : "ghost"}>
             {hasOne ? "Continue" : "Skip for now"}
@@ -484,8 +491,9 @@ function StepFirstAction() {
       </CardHeader>
       <CardBody>
         <p className="text-sm text-mute">
-          Type a niche. Midas scans, scores, drafts a daily revenue move, and queues an
-          approval card. Nothing leaves your machine without your click.
+          Type a niche or choose a starter persona. MIDAS scans, drafts a useful move,
+          and puts risky actions in Approvals. Nothing leaves your machine without your
+          click.
         </p>
         {personas.length > 0 && (
           <div className="mt-4 grid gap-2">

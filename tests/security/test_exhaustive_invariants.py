@@ -386,8 +386,8 @@ def test_code_complex_scrubs_provider_keys_from_env(tmp_path: Path) -> None:
 
     saved_openai = os.environ.get("OPENAI_API_KEY")
     saved_stripe = os.environ.get("STRIPE_API_KEY")
-    os.environ["OPENAI_API_KEY"] = "sk-secret-do-not-leak"
-    os.environ["STRIPE_API_KEY"] = "sk_live_do_not_leak"
+    os.environ["OPENAI_API_KEY"] = "provider-secret-placeholder"
+    os.environ["STRIPE_API_KEY"] = "stripe-secret-placeholder"
     captured: dict[str, dict[str, str]] = {}
 
     class _FakeProc:

@@ -88,7 +88,8 @@ class LoginToken:
 
     @property
     def value(self) -> str:
-        assert self._value is not None
+        if self._value is None:
+            raise RuntimeError("login token has already been consumed")
         return self._value
 
     def consume(self, candidate: str) -> bool:

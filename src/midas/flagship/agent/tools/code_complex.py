@@ -35,7 +35,7 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -167,7 +167,7 @@ def execute_code_complex(payload: dict[str, Any]) -> CodeComplexResult:
 
     started = _monotonic()
     try:
-        proc = subprocess.run(  # noqa: S603 — we control args and cwd
+        proc = subprocess.run(  # nosec B603
             [cli, "-p", prompt, "--output-format", "json"],
             cwd=workdir,
             env=safe_env,

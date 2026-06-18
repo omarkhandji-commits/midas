@@ -264,7 +264,13 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         return _json(200, {"runs": rows[:50]})
 
     @app.get("/api/proofs")
-    def api_proofs(request: Request) -> Response:
+    def api_proofs(
+        request: Request,
+        run_id: str = "",
+        tool: str = "",
+        date_from: str = "",
+        date_to: str = "",
+    ) -> Response:
         _require_session(request)
         receipts = list(deps.ledger) if deps.ledger is not None else []
         chain: dict[str, Any] = {"ok": True, "count": len(receipts), "error": None}
@@ -276,6 +282,13 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
                 chain = {"ok": verified.ok, "count": verified.count, "error": verified.error}
             except Exception:
                 chain = {"ok": False, "count": len(receipts), "error": "verify failed"}
+        filtered = [
+            r for r in receipts
+            if (not run_id or r.body.run_id == run_id)
+            and (not tool or r.body.tool == tool)
+            and (not date_from or r.body.ts >= date_from)
+            and (not date_to or r.body.ts <= date_to)
+        ]
         proofs = [
             {
                 "seq": r.body.seq,
@@ -287,9 +300,9 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
                 "prev_hash": r.body.prev_hash,
                 "ts": r.body.ts,
             }
-            for r in receipts[-100:]
+            for r in filtered[-250:]
         ]
-        return _json(200, {"proofs": proofs, "chain": chain})
+        return _json(200, {"proofs": proofs, "chain": chain, "total_matches": len(filtered)})
 
     @app.get("/api/approvals")
     def api_approvals(request: Request) -> Response:
@@ -585,6 +598,103 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         )
         return _json(200, {"ok": True, "assets": asset_json, "pdfs": pdfs})
 
+    @app.post("/api/tools/blog-lint")
+    async def api_tools_blog_lint(request: Request) -> Response:
+        _require_session(request)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            markdown = str(body.get("markdown") or "")
+            title = str(body.get("title") or "")
+            meta_description = str(body.get("meta_description") or "")
+            site_domain = str(body.get("site_domain") or "")
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        from midas.flagship.agent.tools.blog_seo import lint_blog
+
+        result = lint_blog(
+            markdown=markdown,
+            title=title,
+            meta_description=meta_description,
+            site_domain=site_domain,
+        )
+        _receipt(
+            deps,
+            tool="blog.seo_lint",
+            inputs={"title": title, "chars": len(markdown)},
+            outputs={"score": result.score, "issues": len(result.issues)},
+        )
+        return _json(200, {"ok": True, "result": result.to_dict()})
+
+    @app.post("/api/tools/course-outline")
+    async def api_tools_course_outline(request: Request) -> Response:
+        _require_session(request)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            topic = str(body.get("topic") or "")
+            audience = str(body.get("audience") or "beginners")
+            modules = int(body.get("modules") or 5)
+            objectives = body.get("learning_objectives") or []
+            if not isinstance(objectives, list):
+                return _json(400, {"error": "learning_objectives must be a list"})
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        from midas.flagship.agent.tools.course import plan_course_outline
+
+        try:
+            result = plan_course_outline(
+                topic=topic,
+                audience=audience,
+                n_modules=modules,
+                learning_objectives=[str(x) for x in objectives],
+            )
+        except Exception as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="course.outline_draft",
+            inputs={"topic": topic, "modules": modules},
+            outputs={"module_count": len(result.modules)},
+        )
+        return _json(200, {"ok": True, "course": result.to_dict()})
+
+    @app.post("/api/tools/newsletter-draft")
+    async def api_tools_newsletter_draft(request: Request) -> Response:
+        _require_session(request)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            subject = str(body.get("subject") or "")
+            newsletter_body = str(body.get("body") or "")
+            unsubscribe_url = str(body.get("unsubscribe_url") or "")
+            physical_address = str(body.get("physical_address") or "")
+            preview_text = str(body.get("preview_text") or "")
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        from midas.flagship.agent.tools.newsletter import NewsletterError, plan_newsletter
+
+        try:
+            result = plan_newsletter(
+                subject=subject,
+                body=newsletter_body,
+                unsubscribe_url=unsubscribe_url,
+                physical_address=physical_address,
+                preview_text=preview_text,
+            )
+        except NewsletterError as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="newsletter.draft",
+            inputs={"subject": subject, "chars": len(newsletter_body)},
+            outputs={"sha256_intent": result.sha256_intent, "char_count": result.char_count},
+        )
+        return _json(200, {"ok": True, "newsletter": result.as_dict()})
+
     @app.get("/api/channels")
     def api_channels(request: Request) -> Response:
         _require_session(request)
@@ -650,6 +760,29 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
                 }
             )
         return _json(200, {"tools": items})
+
+    @app.post("/api/capabilities/scan")
+    def api_capabilities_scan(request: Request) -> Response:
+        _require_session(request)
+        from midas.flagship.capabilities import scan_capabilities
+
+        return _json(200, {"capabilities": [p.as_dict() for p in scan_capabilities()]})
+
+    @app.post("/api/capabilities/plan")
+    async def api_capabilities_plan(request: Request) -> Response:
+        _require_session(request)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            goal = str(body.get("goal") or "").strip()
+        except Exception:
+            return _json(400, {"error": "invalid json"})
+        if not goal:
+            return _json(400, {"error": "goal required"})
+        from midas.flagship.capabilities import plan_capability
+
+        return _json(200, {"plan": plan_capability(goal).as_dict()})
 
     @app.get("/api/personas")
     def api_personas(request: Request) -> Response:
@@ -2106,10 +2239,13 @@ class _RuntimeShim:
         outputs: Any,
         decision: Any = None,
         cost_usd: float = 0.0,
+        taint_in: Any = None,
+        taint_out: Any = None,
+        approval_id: str | None = None,
     ) -> None:
         if self.ledger is None:
             return
-        from midas.core.receipts.models import Decision
+        from midas.core.receipts.models import Decision, Taint
 
         self.ledger.append(
             run_id=run_id,
@@ -2119,6 +2255,9 @@ class _RuntimeShim:
             inputs=inputs,
             outputs=outputs,
             cost_usd=cost_usd,
+            taint_in=taint_in or Taint.TRUSTED,
+            taint_out=taint_out or Taint.TRUSTED,
+            approval_id=approval_id,
         )
 
 
@@ -2192,6 +2331,9 @@ def _approval_json(req: Any) -> dict[str, Any]:
         "action": req.action,
         "summary": req.summary,
         "payload": req.payload,
+        "risk": getattr(req, "risk", "medium"),
+        "estimated_cost_usd": getattr(req, "estimated_cost_usd", 0.0),
+        "expires_ts": getattr(req, "expires_ts", None),
         "status": req.status.value,
         "created_ts": req.created_ts,
         "resolved_ts": req.resolved_ts,

@@ -233,6 +233,108 @@ def _execute_stripe_payment_link(runtime: Any, request: ApprovalRequest) -> dict
     }
 
 
+def _execute_stripe_create(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    from .tools.stripe_pay import (
+        StripeBackendError,
+        execute_price_draft,
+        execute_product_draft,
+    )
+
+    payload = request.payload or {}
+    fn = execute_product_draft if request.tool == "stripe.product.draft" else execute_price_draft
+    try:
+        result = fn(payload)
+    except StripeBackendError as e:
+        runtime.append_receipt(
+            run_id=request.run_id,
+            agent="execute",
+            tool=f"{request.tool}.failed",
+            inputs={"approval_id": request.id},
+            outputs={"error": str(e)},
+            decision=Decision.DENY,
+            taint_out=Taint.UNTRUSTED,
+            approval_id=str(request.id),
+        )
+        raise
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool=f"{request.tool}.executed",
+        inputs={"approval_id": request.id},
+        outputs={"id": result.id, "object": result.object, "raw_status": result.raw_status},
+        decision=Decision.ALLOW,
+        taint_out=Taint.UNTRUSTED,
+        approval_id=str(request.id),
+    )
+    return {"id": result.id, "object": result.object, "raw_status": result.raw_status}
+
+
+def _execute_pod_publish(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    from .tools.pod import PodError, execute_pod_publish
+
+    payload = request.payload or {}
+    try:
+        result = execute_pod_publish(payload)
+    except PodError as e:
+        runtime.append_receipt(
+            run_id=request.run_id,
+            agent="execute",
+            tool="pod.publish_draft.failed",
+            inputs={"approval_id": request.id, "provider": payload.get("provider")},
+            outputs={"error": str(e)},
+            decision=Decision.DENY,
+            taint_out=Taint.UNTRUSTED,
+            approval_id=str(request.id),
+        )
+        raise
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool="pod.publish_draft.executed",
+        inputs={"approval_id": request.id, "provider": result.provider},
+        outputs={"id": result.id, "raw_status": result.raw_status},
+        decision=Decision.ALLOW,
+        taint_out=Taint.UNTRUSTED,
+        approval_id=str(request.id),
+    )
+    return {"id": result.id, "provider": result.provider, "raw_status": result.raw_status}
+
+
+def _execute_remotion_render(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    from .tools.video import execute_remotion_render
+
+    payload = request.payload or {}
+    try:
+        result = execute_remotion_render(payload)
+    except ValueError as e:
+        runtime.append_receipt(
+            run_id=request.run_id,
+            agent="execute",
+            tool="remotion.render.failed",
+            inputs={"approval_id": request.id, "project_zip": payload.get("project_zip")},
+            outputs={"error": str(e)},
+            decision=Decision.DENY,
+            taint_out=Taint.UNTRUSTED,
+            approval_id=str(request.id),
+        )
+        raise
+    runtime.append_receipt(
+        run_id=request.run_id,
+        agent="execute",
+        tool="remotion.render.executed",
+        inputs={"approval_id": request.id, "project_zip": payload.get("project_zip")},
+        outputs={
+            "output_path": result.output_path,
+            "sha256_new": result.sha256_new,
+            "bytes_len": result.bytes_len,
+        },
+        decision=Decision.ALLOW,
+        taint_out=Taint.UNTRUSTED,
+        approval_id=str(request.id),
+    )
+    return asdict(result)
+
+
 def _execute_social_publish(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     """Post-approval social publish — calls the platform adapter and records
     a receipt tagged with ``platform`` + ``post_id`` so per-post ROI can join.
@@ -295,11 +397,13 @@ def _execute_social_publish(runtime: Any, request: ApprovalRequest) -> dict[str,
 
 
 def _execute_fs_write(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
-    from .tools.fs import execute_fs_write
+    from .tools.fs import execute_fs_write, plan_fs_write
 
     payload = request.payload or {}
     path = str(payload.get("path") or "")
     content = payload.get("content") or ""
+    planned = plan_fs_write(runtime.fs_guard, path, content)
+    _assert_write_matches_approval(payload, planned.sha256_new, planned.sha256_prev)
     plan = execute_fs_write(runtime.fs_guard, path, content)
     out = asdict(plan)
     runtime.append_receipt(
@@ -319,14 +423,21 @@ def _execute_fs_write(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
 
 
 def _execute_code_run(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
+    import hashlib
+
     from .tools.code import CodePlan, execute_code_approved
 
     payload = request.payload or {}
+    code = str(payload.get("code") or "")
+    expected_sha = str(payload.get("code_sha256") or "")
+    got_sha = hashlib.sha256(code.encode("utf-8", errors="replace")).hexdigest()
+    if not expected_sha or got_sha != expected_sha:
+        raise ValueError("code.run payload hash drifted or is missing code_sha256")
     plan = CodePlan(
-        code=str(payload.get("code") or ""),
+        code=code,
         language=str(payload.get("language") or "python"),
         timeout_seconds=float(payload.get("timeout_seconds") or payload.get("timeout") or 10.0),
-        code_sha256=str(payload.get("code_sha256") or ""),
+        code_sha256=expected_sha,
         preview=str(payload.get("preview") or ""),
     )
     result = execute_code_approved(runtime.fs_guard, plan)
@@ -485,7 +596,7 @@ def _cash_handler(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     approval payload. The bytes are then written through the same
     ``execute_fs_write`` chokepoint the rest of the artifact factory uses.
     """
-    from .tools.fs import execute_fs_write
+    from .tools.fs import execute_fs_write, plan_fs_write
 
     builder = _CASH_BUILDERS.get(request.tool)
     if builder is None:
@@ -493,6 +604,8 @@ def _cash_handler(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     payload = request.payload or {}
     content = builder(payload)
     path = str(payload.get("path") or "")
+    planned = plan_fs_write(runtime.fs_guard, path, content)
+    _assert_write_matches_approval(payload, planned.sha256_new, planned.sha256_prev)
     plan = execute_fs_write(runtime.fs_guard, path, content)
     runtime.append_receipt(
         run_id=request.run_id,
@@ -516,6 +629,20 @@ def _cash_handler(runtime: Any, request: ApprovalRequest) -> dict[str, Any]:
     }
 
 
+def _assert_write_matches_approval(
+    payload: dict[str, Any],
+    sha256_new: str,
+    sha256_prev: str | None,
+) -> None:
+    expected_new = str(payload.get("sha256_new") or "")
+    if not expected_new:
+        raise ValueError("approval payload missing sha256_new")
+    if expected_new != sha256_new:
+        raise ValueError("approved payload hash drifted")
+    if "sha256_prev" in payload and payload.get("sha256_prev") != sha256_prev:
+        raise ValueError("target file changed since approval")
+
+
 def _register_cash_builders() -> None:
     from .tools.cash import (
         execute_adcopy,
@@ -526,6 +653,8 @@ def _register_cash_builders() -> None:
         execute_quote,
     )
     from .tools.image import execute_image_bytes
+    from .tools.pod import execute_pod_spec
+    from .tools.video import execute_remotion_project_bytes
     from .tools.voice_synth import execute_voice_bytes
 
     _CASH_BUILDERS.update(
@@ -539,6 +668,8 @@ def _register_cash_builders() -> None:
             # Image + voice return bytes; execute_fs_write accepts bytes natively.
             "image.draft": execute_image_bytes,
             "voice.synthesize": execute_voice_bytes,
+            "remotion.project.draft": execute_remotion_project_bytes,
+            "pod.product_spec": execute_pod_spec,
         }
     )
 
@@ -568,10 +699,16 @@ _HANDLERS = {
     "adcopy.draft": _cash_handler,
     "image.draft": _cash_handler,
     "voice.synthesize": _cash_handler,
+    "remotion.project.draft": _cash_handler,
+    "pod.product_spec": _cash_handler,
+    "pod.publish_draft": _execute_pod_publish,
     "social.publish": _execute_social_publish,
     "stripe.payment_link": _execute_stripe_payment_link,
+    "stripe.product.draft": _execute_stripe_create,
+    "stripe.price.draft": _execute_stripe_create,
     "code.complex": _execute_code_complex,
     "code.edit_plan": _execute_code_edit,
     "web.automate": _execute_web_automate,
+    "remotion.render": _execute_remotion_render,
     "email.send": _execute_email_send,
 }

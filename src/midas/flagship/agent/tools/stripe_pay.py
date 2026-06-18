@@ -47,6 +47,16 @@ class PaymentLinkResult:
     raw_status: str = ""
 
 
+@dataclass(frozen=True)
+class StripeCreateResult:
+    """Flat result for post-approval Stripe create calls."""
+
+    id: str
+    object: str
+    url: str = ""
+    raw_status: str = ""
+
+
 class StripeBackend(Protocol):
     name: str
 
@@ -80,6 +90,32 @@ class StripePaymentLinkPlan:
     product_name: str
     amount_minor: int
     currency: str
+    sha256_intent: str
+    preview: str
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class StripeProductDraftPlan:
+    kind: str
+    name: str
+    description: str
+    images: list[str]
+    metadata: dict[str, str]
+    sha256_intent: str
+    preview: str
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class StripePriceDraftPlan:
+    kind: str
+    product: str
+    unit_amount_minor: int
+    currency: str
+    recurring_interval: str | None
+    lookup_key: str
+    metadata: dict[str, str]
     sha256_intent: str
     preview: str
     meta: dict[str, Any] = field(default_factory=dict)
@@ -333,3 +369,217 @@ register_backend(StubStripeBackend())
 
 def register_default_backends() -> None:
     register_backend(StripeBackendImpl())
+
+
+def _hash_payload(prefix: str, payload: dict[str, Any]) -> str:
+    import json
+
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"{prefix}|{body}".encode()).hexdigest()
+
+
+def plan_stripe_product_draft(
+    *,
+    name: str,
+    description: str = "",
+    images: list[str] | None = None,
+    metadata: dict[str, str] | None = None,
+) -> StripeProductDraftPlan:
+    """Build an approval payload for creating a Stripe product. No egress."""
+    clean_name = name.strip()
+    if not clean_name:
+        raise ValueError("stripe.product.draft needs a non-empty name")
+    clean_images = [str(img).strip() for img in (images or []) if str(img).strip()]
+    if len(clean_images) > 8:
+        raise ValueError("stripe.product.draft accepts at most 8 images")
+    clean_meta = _clean_metadata(metadata or {})
+    intent_payload: dict[str, Any] = {
+        "name": clean_name,
+        "description": description.strip(),
+        "images": clean_images,
+        "metadata": clean_meta,
+    }
+    return StripeProductDraftPlan(
+        kind="stripe_product",
+        name=clean_name,
+        description=description.strip(),
+        images=clean_images,
+        metadata=clean_meta,
+        sha256_intent=_hash_payload("stripe.product", intent_payload),
+        preview=f"Create Stripe product: {clean_name}",
+        meta={"n_images": len(clean_images), "n_metadata": len(clean_meta)},
+    )
+
+
+def plan_stripe_price_draft(
+    *,
+    product: str,
+    unit_amount: float,
+    currency: str = "USD",
+    recurring_interval: str | None = None,
+    lookup_key: str = "",
+    metadata: dict[str, str] | None = None,
+) -> StripePriceDraftPlan:
+    """Build an approval payload for a one-time or recurring Stripe price."""
+    product_id = product.strip()
+    if not product_id:
+        raise ValueError("stripe.price.draft needs a product id")
+    cur = currency.strip().lower()
+    if cur not in _CURRENCY_MIN_AMOUNT:
+        raise ValueError(
+            f"unsupported currency {currency!r}; supported: {sorted(_CURRENCY_MIN_AMOUNT)}"
+        )
+    interval = recurring_interval.strip().lower() if recurring_interval else None
+    if interval == "":
+        interval = None
+    if interval not in {None, "month", "year"}:
+        raise ValueError("recurring_interval must be 'month', 'year', or omitted")
+    minor = _to_minor(float(unit_amount), cur)
+    min_floor = _CURRENCY_MIN_AMOUNT[cur]
+    if minor < min_floor:
+        raise ValueError(f"amount below Stripe minimum for {cur}: {minor} < {min_floor}")
+    if minor > _MAX_MINOR:
+        raise ValueError(f"amount above sanity cap: {minor} > {_MAX_MINOR}")
+    clean_meta = _clean_metadata(metadata or {})
+    lookup = lookup_key.strip() or _default_lookup_key(product_id, minor, cur, interval)
+    intent_payload: dict[str, Any] = {
+        "product": product_id,
+        "unit_amount_minor": minor,
+        "currency": cur,
+        "recurring_interval": interval,
+        "lookup_key": lookup,
+        "metadata": clean_meta,
+    }
+    cadence = f"/{interval}" if interval else " one-time"
+    return StripePriceDraftPlan(
+        kind="stripe_price",
+        product=product_id,
+        unit_amount_minor=minor,
+        currency=cur,
+        recurring_interval=interval,
+        lookup_key=lookup,
+        metadata=clean_meta,
+        sha256_intent=_hash_payload("stripe.price", intent_payload),
+        preview=f"Create Stripe price: {cur.upper()} {unit_amount:.2f}{cadence}",
+        meta={"amount": float(unit_amount), "n_metadata": len(clean_meta)},
+    )
+
+
+def execute_product_draft(payload: dict[str, Any]) -> StripeCreateResult:
+    product_payload = {
+        "name": str(payload.get("name") or ""),
+        "description": str(payload.get("description") or ""),
+        "images": [str(x) for x in (payload.get("images") or [])],
+        "metadata": {str(k): str(v) for k, v in (payload.get("metadata") or {}).items()},
+    }
+    if not product_payload["name"]:
+        raise StripeBackendError("stripe.product.draft payload missing name")
+    _assert_payload_hash("stripe.product", product_payload, payload)
+    result = _stripe_post("/v1/products", _flatten_product_payload(product_payload))
+    product_id = str(result.get("id") or "")
+    if not product_id:
+        raise StripeBackendError("stripe product response missing id")
+    return StripeCreateResult(id=product_id, object="product", raw_status="stripe_ok")
+
+
+def execute_price_draft(payload: dict[str, Any]) -> StripeCreateResult:
+    interval = payload.get("recurring_interval")
+    interval = str(interval) if interval else None
+    product = str(payload.get("product") or "")
+    amount_minor = int(payload.get("unit_amount_minor") or 0)
+    price_payload = {
+        "product": product,
+        "unit_amount_minor": amount_minor,
+        "currency": str(payload.get("currency") or "").lower(),
+        "recurring_interval": interval,
+        "lookup_key": str(payload.get("lookup_key") or ""),
+        "metadata": {str(k): str(v) for k, v in (payload.get("metadata") or {}).items()},
+    }
+    if not product or amount_minor <= 0:
+        raise StripeBackendError("stripe.price.draft payload missing product or amount")
+    _assert_payload_hash("stripe.price", price_payload, payload)
+    result = _stripe_post("/v1/prices", _flatten_price_payload(price_payload))
+    price_id = str(result.get("id") or "")
+    if not price_id:
+        raise StripeBackendError("stripe price response missing id")
+    return StripeCreateResult(id=price_id, object="price", raw_status="stripe_ok")
+
+
+def _clean_metadata(metadata: dict[str, str]) -> dict[str, str]:
+    clean: dict[str, str] = {}
+    for key, value in metadata.items():
+        k = str(key).strip()
+        if not k:
+            continue
+        if len(k) > 40:
+            raise ValueError(f"metadata key too long: {k[:20]}...")
+        clean[k] = str(value).strip()[:500]
+    return clean
+
+
+def _default_lookup_key(
+    product: str, amount_minor: int, currency: str, interval: str | None
+) -> str:
+    digest = hashlib.sha256(
+        f"{product}|{amount_minor}|{currency}|{interval or 'once'}".encode()
+    ).hexdigest()[:12]
+    return f"midas_{currency}_{amount_minor}_{digest}"
+
+
+def _assert_payload_hash(
+    prefix: str, intent_payload: dict[str, Any], approval_payload: dict[str, Any]
+) -> None:
+    expected = str(approval_payload.get("sha256_intent") or "")
+    if expected and _hash_payload(prefix, intent_payload) != expected:
+        raise StripeBackendError(f"{prefix} refused: payload intent hash drifted")
+
+
+def _flatten_product_payload(payload: dict[str, Any]) -> dict[str, str]:
+    data = {"name": str(payload["name"])}
+    if payload.get("description"):
+        data["description"] = str(payload["description"])
+    for i, image in enumerate(payload.get("images") or []):
+        data[f"images[{i}]"] = str(image)
+    for key, value in (payload.get("metadata") or {}).items():
+        data[f"metadata[{key}]"] = str(value)
+    return data
+
+
+def _flatten_price_payload(payload: dict[str, Any]) -> dict[str, str]:
+    data = {
+        "product": str(payload["product"]),
+        "unit_amount": str(payload["unit_amount_minor"]),
+        "currency": str(payload["currency"]),
+        "lookup_key": str(payload["lookup_key"]),
+    }
+    if payload.get("recurring_interval"):
+        data["recurring[interval]"] = str(payload["recurring_interval"])
+    for key, value in (payload.get("metadata") or {}).items():
+        data[f"metadata[{key}]"] = str(value)
+    return data
+
+
+def _stripe_post(path: str, data: dict[str, str]) -> dict[str, Any]:
+    api_key = os.environ.get("STRIPE_API_KEY")
+    if not api_key:
+        raise StripeBackendError("Stripe execution needs STRIPE_API_KEY")
+    if not api_key.startswith(("sk_", "rk_")):
+        raise StripeBackendError("Stripe API key must be sk_ or rk_, not publishable")
+    try:
+        import httpx
+    except ImportError as e:
+        raise StripeBackendError("Stripe execution needs httpx") from e
+    try:
+        resp = httpx.post(
+            f"https://api.stripe.com{path}",
+            auth=(api_key, ""),
+            data=data,
+            timeout=30.0,
+        )
+    except httpx.HTTPError as e:
+        raise StripeBackendError(f"Stripe request failed: {e}") from e
+    if resp.status_code != 200:
+        raise StripeBackendError(
+            f"Stripe {path} returned {resp.status_code}: {resp.text[:200]}"
+        )
+    return dict(resp.json() or {})

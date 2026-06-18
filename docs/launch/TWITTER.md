@@ -1,76 +1,39 @@
-# Launch thread — Twitter/X (do NOT post until repo is public)
+# Launch Thread Draft
 
-## Tweet 1 (hook)
+Do not post until the repository is public.
 
-> Every AI agent demo ends with "look, it sent the email."
->
-> MIDAS demos end with: *fifteen emails did not send because you didn't tap approve.*
->
-> Open source. Hash-chained signed receipts. Verifier you can run with 100 lines of Python.
->
-> 🧵
+## Post 1
 
-## Tweet 2 (the moat)
+I published MIDAS, an open-source local-first AI agent for LLM workflows that
+need approvals, signed receipts, budget controls, a dashboard, CLI, Ollama, and
+MCP support.
 
-> Every tool call writes an Ed25519-signed, hash-chained receipt.
->
-> A 100-line standalone verifier reads your ledger with **only `pynacl` installed** — no MIDAS trust required.
->
-> Tamper one byte → caught at the corrupted `seq`.
->
-> Spec: docs/RECEIPT_V1.md (frozen v1 with test vectors).
+https://github.com/omarkhandji-commits/midas
 
-## Tweet 3 (the constraint)
+## Post 2
 
-> Approval-default isn't a setting. It's a structural invariant.
->
-> Outbound sends, refunds, irreversible actions — all enter an ApprovalQueue.
-> Human approves from dashboard, Telegram, Slack, Discord, WhatsApp, Email, or SMS.
->
-> No "full auto" toggle bypasses it. By design.
+The goal is practical: review agent actions before they touch files, services,
+or external tools.
 
-## Tweet 4 (the budget)
+MIDAS queues risky actions for approval and records important steps in a receipt
+ledger.
 
-> The budget fuse fires **before** the call, not after.
->
-> Reserve → check cap → execute. A runaway loop can't blow past your monthly cap because
-> the next call literally never reaches the model.
->
-> Per-task / daily / monthly all enforced atomically.
+## Post 3
 
-## Tweet 5 (the proof)
+It can run with Ollama locally or with cloud providers when you add your own API
+key.
 
-> 9 Proof-First evals run on every commit, deterministic + offline:
->
-> – fake-source clamping
-> – unsourced claims downgrade
-> – budget fuse raises BEFORE call
-> – lethal trifecta = DENY
-> – context compression fidelity
-> – asset quality (no AI slop)
-> – web research (no HIGH without verified sources)
-> – τ-bench rule adherence (100% refusal of forbidden actions)
-> – operator autonomy guardrails
+The dashboard runs locally. Developers can also use the CLI.
 
-## Tweet 6 (the disclaimer / honesty)
+## Post 4
 
-> I don't claim MIDAS is "secure" or "compliant" — those are organizational claims.
->
-> The code does what it does. The spec is public. The receipts verify.
->
-> Alpha; breaking changes possible until 1.0.
+I would value feedback on the non-developer install flow, approval center,
+receipt verifier, and local model setup.
 
-## Tweet 7 (CTA)
+The project is pre-1.0, so I am keeping the claims narrow and the roadmap open.
 
-> Local-first. Provider-agnostic (local Ollama or cloud). Loopback-only dashboard. Zero telemetry.
->
-> github.com/<owner>/<repo>
->
-> Show HN coming this week.
+## Posting Notes
 
----
-
-**Posting notes:**
-- Schedule Tweet 1 for 09:30 ET, then 90 sec between subsequent tweets.
-- Replace `<owner>/<repo>` with real handle.
-- Pin Tweet 1 for at least 7 days.
+- Pin Post 1 after publishing.
+- Add one dashboard screenshot under Post 1.
+- Do not mention outcomes, rankings, or exaggerated claims.

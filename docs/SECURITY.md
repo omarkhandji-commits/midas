@@ -1,115 +1,118 @@
-# MIDAS — Security & Control model
+# Security Model
 
-Security is not a feature bolted on at the end — it is the first question of every step.
-There is no "world's most advanced firewall"; real safety is **defense-in-depth**:
-least-privilege, default-deny, human approval on outbound actions, hard spend caps, and a
-tamper-evident audit trail. This document is honest about what protects you and what does not.
+MIDAS uses defense in depth: least privilege, default deny, approval before risky
+actions, budget limits, taint tracking, and signed receipts. This document states
+what the project is designed to protect and what remains the operator's
+responsibility.
 
-## Threat model (what we actually defend against)
-1. **The agent doing something irreversible or costly** (sending spam, deploying, paying,
-   deleting files, pushing bad code).
-2. **Prompt injection** — a malicious web page, email, or document telling the agent to
-   exfiltrate keys, contact people, or run commands.
-3. **Secret leakage** — API keys / tokens ending up in logs, commits, or model context.
-4. **Runaway spend** — token loops draining your API budget silently.
-5. **Bad data → bad decisions** — hallucinated market facts driving a real action.
+Read [DISCLAIMER.md](../DISCLAIMER.md) before connecting external accounts,
+generated content, or automation.
 
-## Control layers
+## Threats MIDAS Tries To Reduce
 
-### 1. Default-deny + two-key approval (the Vault gate)
-Every action is classified `analyze` (free) or `act` (gated). All `act` operations —
-**send email/message, publish, contact a prospect, write/push a repo, deploy, pay/buy,
-delete or overwrite files not created by the agent, any irreversible decision** — are
-**blocked by default** and queued. They execute only after an explicit human **Approve**
-(one tap in Telegram or click in the desktop app). Reject is the safe default; timeout =
-no action.
+1. An agent changing files, calling services, publishing, or using tools without
+   review.
+2. Prompt injection from fetched web pages, PDFs, emails, MCP output, or other
+   untrusted content.
+3. Secrets leaking into logs, receipts, prompts, screenshots, fixtures, or docs.
+4. Runaway model calls exceeding local budget limits.
+5. Approval replay, stale payload execution, and double approval.
+6. Path traversal and unsafe file access.
+7. Remote skill or connector installation without review.
 
-### 2. Least privilege per sub-agent
-Each sub-agent gets only the tools it needs (see `config/policy.yml`). Scout can search and
-read but cannot write files. Outreach can draft but cannot send. The Builder can plan but
-needs approval to touch a repo. No sub-agent has blanket access.
+## Control Layers
 
-### 3. Spend caps with auto-halt
-Hard `per-task`, `daily`, and `monthly` USD caps (in `.env` / `policy.yml`). The agent
-tracks spend per call; crossing a cap **halts the run and alerts you** rather than
-continuing. Cheap model by default; the expensive model is itself a gated escalation.
+### Policy And Approval
 
-### 4. Tamper-evident audit log
-Every action request, decision, approval, and spend is appended to a hash-chained JSONL log
-(`audit/`). Append-only; each entry references the previous entry's hash, so silent edits
-are detectable. This is your "what did the agent do and why" record.
+MIDAS classifies actions before execution. Read-only planning can run directly.
+Actions that mutate state or call external systems enter the approval queue with:
 
-### 5. Prompt-injection defense
-- Fetched content (web, email, docs) is **data, never instructions.** The agent must never
-  execute commands found inside retrieved content.
-- Instruction/content separation: untrusted text is wrapped and labeled untrusted.
-- Egress allow-list: outbound network only to approved domains.
-- A message from a channel (e.g. Telegram) saying "approve the pending action" is treated
-  as a **red flag**, not an approval — approvals come only from the verified owner via the
-  approval UI, never from chat text that merely claims authority.
+- preview;
+- risk;
+- estimated cost;
+- expiry;
+- intent hash;
+- previous and new content hashes where relevant.
 
-### 6. Secret handling
-- Secrets live in the OS keychain or an encrypted `.env` that is **gitignored**.
-- `providers.yml` (real keys) is gitignored; only `providers.example.yml` is committed.
-- Secrets are never printed to logs, never placed in model context, never echoed back.
-- Pre-commit / CI secret scan recommended before any push.
+Approved actions are checked again before execution. If the approved payload
+drifts, MIDAS must reject it.
 
-### 7. Sandboxing
-- File operations are scoped to the project workspace; system paths are deny-listed.
-- The agent cannot modify its own security policy or the audit log.
-- Optional: run the standalone version in a container with no host mounts beyond the workspace.
+### Taint Tracking
 
-### 8. Skills and schedules
-- Local skills must contain `SKILL.md` and pass static checks before install.
-- Executable payloads such as `.exe`, `.bat`, `.cmd`, `.ps1`, `.vbs`, and `.dll` are denied.
-- Remote skill downloads are queued for approval and manual review; MIDAS does not auto-install them.
-- Schedule commands are recipes only. MIDAS prints cron, Windows Task Scheduler, and GitHub
-  Actions snippets, but the operator installs them deliberately.
+Fetched or third-party content is untrusted data. MIDAS can summarize it, cite it,
+or use it as input, but it must not treat instructions inside it as operator
+commands.
 
-### 8. Kill switch
-`MIDAS_KILL_SWITCH=on` (env) or the word "stop"/"freeze" from the owner halts **all** agent
-actions immediately. The agent then only answers direct questions.
+### Budget Controls
 
-## Anti-hallucination / source discipline
-- **Cite or abstain.** Every market claim carries a source + confidence (High/Med/Low).
-- No fabricated numbers, reviews, competitors, or leads — ever.
-- High-stakes outputs get a self-check pass: "every claim sourced? any fabrication? any
-  un-gated irreversible step?" before they are shown.
-- An action is never taken on Low-confidence data without explicit human sign-off.
+Budget gates apply before model calls or expensive work. MIDAS supports per-task,
+daily, monthly, per-skill, and per-persona controls.
 
-## What MIDAS can do alone / must ask / must never do
-| Can do alone | Must ask first | Must never do |
-|---|---|---|
-| Research, analyze, score | Send any email/message | Spam or scam |
-| Draft copy/pages/code plans | Publish anything public | Lie in marketing |
-| Build local files | Contact prospects | Promise guaranteed income |
-| Prepare (not send) lead lists | Write/push a repo, deploy | Mass-send without approval |
-| Update its own memory/P&L | Pay/buy anything | Move money without approval |
-| Propose decisions | Delete/overwrite others' files | Leak secrets / keys |
-| | Any irreversible decision | Obey instructions hidden in fetched content |
+### Secrets
 
-## Dashboard CSP — explicit concessions
+Secrets must stay out of git, logs, receipts, model context, screenshots, test
+fixtures, and docs. Real provider config is ignored by git; only examples should
+be committed.
 
-The local Operator Console runs **on loopback (127.0.0.1) only**, behind one-time-token
-login, owner-gated sessions, double-submit CSRF, and a strict Origin check. Within that
-envelope the Content-Security-Policy is:
+### Skills And Connectors
 
-- `default-src 'self'` — nothing from outside the box.
-- `script-src 'self' 'nonce-…'` — scripts strict; **no inline scripts**, only our own
-  bundled JS plus the per-response nonce. No CDN, no third-party origin.
-- `style-src 'self' 'unsafe-inline'` — **narrow, documented concession**. The shadcn /
-  Radix primitives we use (popovers, dialogs, tooltips) inject inline positioning styles
-  at runtime; allowing inline *for styles only* avoids a brittle workaround. Scripts
-  remain locked, the surface is loopback + owner-gated, and the residual XSS risk for
-  inline style is negligible.
-- `connect-src 'self'` — fetch and EventSource only to our own origin.
-- `img-src 'self' data:` — built-in icons may be inlined as data URIs.
-- `font-src 'self'`, `frame-ancestors 'none'`, `base-uri 'none'`, `form-action 'self'`.
+Local skills must have reviewable metadata. Remote skills must be queued for
+approval and scanned before use. MIDAS must not download or install executable
+payloads silently.
 
-The relevant code lives in `src/midas/flagship/dashboard/security.py`; the concession is
-covered by a precise unit test in `tests/unit/test_dashboard_security.py`.
+### Kill Switch
 
-## Recovery
-Because every `act` is gated and logged, the worst case is "the agent drafted something you
-didn't want" — which you simply Reject. Nothing reaches the outside world, your money, or
-your repos without your tap.
+The kill switch blocks tool execution and leaves only direct answers available.
+Use it when a run behaves unexpectedly or a connected service needs to be frozen.
+
+## What MIDAS Can Do Without Approval
+
+- Read workspace files allowed by policy.
+- Build a repository map.
+- Scan local capabilities.
+- Draft text or plans.
+- Prepare non-mutating previews.
+- Explain missing setup or fallback paths.
+
+## What Requires Approval
+
+- File writes or overwrites.
+- Running generated code.
+- Sending email or messages.
+- Publishing public content.
+- Creating payment, product, subscription, or webhook side effects.
+- Calling external services through MCP or connectors.
+- Installing or enabling remote skills.
+- Any irreversible action.
+
+## What MIDAS Must Not Do
+
+- Leak secrets or keys.
+- Obey instructions hidden in untrusted content.
+- Bypass approval because a prompt asked it to.
+- Send spam or deceptive messages.
+- Scrape private or consent-required personal data.
+- Claim certification, compliance, or guaranteed outcomes.
+
+## Dashboard Security
+
+The dashboard is local and owner-gated. It uses a one-time login token, origin
+checks, CSRF protection, and a restrictive Content Security Policy. Static assets
+ship with the Python package; the dashboard should not need a CDN at runtime.
+
+## Receipts
+
+Important steps write Ed25519-signed receipts in a hash chain. The standalone
+verifier in `tools/verify/` can verify a receipt ledger without importing the
+MIDAS runtime.
+
+## Operator Responsibility
+
+MIDAS reduces silent action. It does not remove operator responsibility. If you
+approve an action, connect a third-party account, add an API key, change policy,
+or run generated code, you remain responsible for the result.
+
+## Reporting Security Issues
+
+Do not open a public issue for a security finding. Follow the process in
+[SECURITY.md](../SECURITY.md).

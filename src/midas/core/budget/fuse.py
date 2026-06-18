@@ -7,7 +7,7 @@ never executes. Actual cost is committed afterwards. A surprise bill is impossib
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from .store import SpendStore
@@ -28,6 +28,8 @@ class Caps:
     per_task: float
     daily: float
     monthly: float
+    per_skill: dict[str, float] = field(default_factory=dict)
+    per_persona: dict[str, float] = field(default_factory=dict)
 
 
 def _start_of_day_iso() -> str:
@@ -45,12 +47,56 @@ class BudgetFuse:
         self.store = store
         self.caps = caps
 
-    def check(self, est_usd: float, *, task_id: str | None = None) -> None:
+    def project(
+        self,
+        est_usd: float,
+        *,
+        task_id: str | None = None,
+        skill: str | None = None,
+        persona: str | None = None,
+    ) -> dict[str, dict[str, float | bool]]:
+        """Return upfront projected spend against every active cap."""
+        out: dict[str, dict[str, float | bool]] = {}
+        if task_id is not None:
+            current = self.store.total(task_id=task_id)
+            out["per_task"] = _projection(current, est_usd, self.caps.per_task)
+        current_day = self.store.total(since_iso=_start_of_day_iso())
+        out["daily"] = _projection(current_day, est_usd, self.caps.daily)
+        current_month = self.store.total(since_iso=_start_of_month_iso())
+        out["monthly"] = _projection(current_month, est_usd, self.caps.monthly)
+        if skill is not None and skill in self.caps.per_skill:
+            current = self.store.total(skill=skill)
+            out[f"skill:{skill}"] = _projection(current, est_usd, self.caps.per_skill[skill])
+        if persona is not None and persona in self.caps.per_persona:
+            current = self.store.total(persona=persona)
+            out[f"persona:{persona}"] = _projection(
+                current, est_usd, self.caps.per_persona[persona]
+            )
+        return out
+
+    def check(
+        self,
+        est_usd: float,
+        *,
+        task_id: str | None = None,
+        skill: str | None = None,
+        persona: str | None = None,
+    ) -> None:
         """Raise BudgetExceeded if committing `est_usd` now would breach any cap."""
         if task_id is not None:
             projected = self.store.total(task_id=task_id) + est_usd
             if projected > self.caps.per_task + _EPS:
                 raise BudgetExceeded("per_task", projected, self.caps.per_task)
+        if skill is not None and skill in self.caps.per_skill:
+            projected = self.store.total(skill=skill) + est_usd
+            cap = self.caps.per_skill[skill]
+            if projected > cap + _EPS:
+                raise BudgetExceeded(f"skill:{skill}", projected, cap)
+        if persona is not None and persona in self.caps.per_persona:
+            projected = self.store.total(persona=persona) + est_usd
+            cap = self.caps.per_persona[persona]
+            if projected > cap + _EPS:
+                raise BudgetExceeded(f"persona:{persona}", projected, cap)
         projected_day = self.store.total(since_iso=_start_of_day_iso()) + est_usd
         if projected_day > self.caps.daily + _EPS:
             raise BudgetExceeded("daily", projected_day, self.caps.daily)
@@ -64,10 +110,20 @@ class BudgetFuse:
         *,
         run_id: str | None = None,
         task_id: str | None = None,
+        skill: str | None = None,
+        persona: str | None = None,
         kind: str | None = None,
         model: str | None = None,
     ) -> None:
-        self.store.record(usd, run_id=run_id, task_id=task_id, kind=kind, model=model)
+        self.store.record(
+            usd,
+            run_id=run_id,
+            task_id=task_id,
+            skill=skill,
+            persona=persona,
+            kind=kind,
+            model=model,
+        )
 
     def guard(
         self,
@@ -75,10 +131,23 @@ class BudgetFuse:
         *,
         task_id: str | None = None,
         run_id: str | None = None,
+        skill: str | None = None,
+        persona: str | None = None,
         kind: str | None = None,
         model: str | None = None,
     ) -> _Guard:
-        return _Guard(self, est_usd, task_id, run_id, kind, model)
+        return _Guard(self, est_usd, task_id, run_id, skill, persona, kind, model)
+
+
+def _projection(current: float, est_usd: float, cap: float) -> dict[str, float | bool]:
+    projected = current + est_usd
+    return {
+        "current": current,
+        "estimated": est_usd,
+        "projected": projected,
+        "cap": cap,
+        "ok": projected <= cap + _EPS,
+    }
 
 
 class _Guard:
@@ -90,6 +159,8 @@ class _Guard:
         est: float,
         task_id: str | None,
         run_id: str | None,
+        skill: str | None,
+        persona: str | None,
         kind: str | None,
         model: str | None,
     ) -> None:
@@ -97,12 +168,19 @@ class _Guard:
         self._est = est
         self._task_id = task_id
         self._run_id = run_id
+        self._skill = skill
+        self._persona = persona
         self._kind = kind
         self._model = model
         self._actual: float | None = None
 
     def __enter__(self) -> _Guard:
-        self._fuse.check(self._est, task_id=self._task_id)
+        self._fuse.check(
+            self._est,
+            task_id=self._task_id,
+            skill=self._skill,
+            persona=self._persona,
+        )
         return self
 
     def set_actual(self, usd: float) -> None:
@@ -113,5 +191,11 @@ class _Guard:
         if exc_type is None:
             usd = self._actual if self._actual is not None else self._est
             self._fuse.commit(
-                usd, run_id=self._run_id, task_id=self._task_id, kind=self._kind, model=self._model
+                usd,
+                run_id=self._run_id,
+                task_id=self._task_id,
+                skill=self._skill,
+                persona=self._persona,
+                kind=self._kind,
+                model=self._model,
             )

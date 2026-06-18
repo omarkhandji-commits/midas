@@ -29,6 +29,7 @@ from typing import Any
 
 from midas.core.agents.toolset import Toolset
 from midas.core.budget.loop_breaker import LoopBreaker
+from midas.core.receipts.models import Taint
 
 MAX_STEPS_HARD_CAP = 16
 
@@ -44,6 +45,7 @@ class AgentStep:
     approval_id: int | None = None
     output_summary: str = ""
     error: str | None = None
+    output_taint: str = Taint.TRUSTED.value
 
 
 @dataclass
@@ -147,7 +149,13 @@ class AgentLoop:
                 transcript.stopped_reason = "planner returned an invalid tool plan"
                 return transcript
 
-            step = _invoke(self._toolset, tool_name, inputs, agent=self._agent)
+            step = _invoke(
+                self._toolset,
+                tool_name,
+                inputs,
+                agent=self._agent,
+                input_taints=_transcript_taints(transcript),
+            )
             transcript.steps.append(step)
 
             if step.error is not None and step.decision == "deny":
@@ -168,9 +176,16 @@ class AgentLoop:
         return transcript
 
 
-def _invoke(toolset: Toolset, tool: str, inputs: dict[str, Any], *, agent: str) -> AgentStep:
+def _invoke(
+    toolset: Toolset,
+    tool: str,
+    inputs: dict[str, Any],
+    *,
+    agent: str,
+    input_taints: set[Taint] | None = None,
+) -> AgentStep:
     try:
-        outcome = toolset.invoke(tool, agent=agent, **inputs)
+        outcome = toolset.invoke(tool, agent=agent, input_taints=input_taints, **inputs)
     except Exception as exc:  # noqa: BLE001 - tool errors are surfaced + receipted
         return AgentStep(
             tool=tool,
@@ -186,7 +201,18 @@ def _invoke(toolset: Toolset, tool: str, inputs: dict[str, Any], *, agent: str) 
         decision=outcome.verdict.decision.value,
         approval_id=outcome.approval_id,
         output_summary=_summarize(outcome.value),
+        output_taint=outcome.output_taint.value,
     )
+
+
+def _transcript_taints(transcript: AgentTranscript) -> set[Taint]:
+    taints = {Taint.TRUSTED}
+    for step in transcript.steps:
+        if step.output_taint == Taint.UNTRUSTED.value:
+            taints.add(Taint.UNTRUSTED)
+        elif step.output_taint == Taint.PRIVATE.value:
+            taints.add(Taint.PRIVATE)
+    return taints
 
 
 def _summarize(value: Any) -> str:

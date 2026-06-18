@@ -36,6 +36,7 @@ import email.header
 import email.utils
 import imaplib
 import os
+from contextlib import suppress
 from dataclasses import dataclass, field
 from email.message import Message
 from typing import Any
@@ -246,7 +247,5 @@ def read_inbox(
             messages=messages,
         )
     finally:
-        try:
+        with suppress(Exception):
             conn.logout()
-        except Exception:
-            pass

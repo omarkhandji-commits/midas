@@ -70,4 +70,8 @@ def test_dashboard_api_returns_product_surfaces(tmp_path: Path) -> None:
     assert client.get("/api/memory/search?q=SEO").json()["memory"][0]["key"] == "offer"
     assert client.get("/api/competitors").json()["competitors"][0]["name"] == "Acme"
     assert client.get("/api/proofs").json()["proofs"][0]["tool"] == "t"
+
+    filtered = client.get("/api/proofs?run_id=r&tool=t").json()
+    assert filtered["total_matches"] == 1
+    assert filtered["proofs"][0]["run_id"] == "r"
     assert "proposal_pdf" in client.get("/api/assets").json()["asset_types"]

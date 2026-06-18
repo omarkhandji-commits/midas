@@ -14,7 +14,7 @@ not the model — decides.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from midas.core.receipts.models import Decision, Taint
@@ -43,6 +43,7 @@ class Tool:
     egress_domains: list[str] = field(default_factory=list)
     # The trust label of THIS tool's output (e.g. web_fetch → UNTRUSTED).
     output_taint: Taint = Taint.TRUSTED
+    prepares_approval_payload: bool = False
 
 
 @dataclass
@@ -114,9 +115,12 @@ class Toolset:
                 # a human resolves the queue, then a separate execute step fires.
                 approval_id: int | None = None
                 if self._approvals is not None:
+                    payload = dict(kwargs)
+                    if tool.prepares_approval_payload:
+                        payload.update(_payload_dict(tool.fn(**kwargs)))
                     req = self._approvals.enqueue(
                         run_id=self._run_id, agent=agent, tool=tool.name, action=tool.action,
-                        summary=f"{agent}: {tool.action} on {tool.name}", payload=kwargs,
+                        summary=_approval_summary(agent, tool, payload), payload=payload,
                     )
                     approval_id = req.id
                 return ToolOutcome(tool.name, verdict, ran=False, approval_id=approval_id)
@@ -168,3 +172,18 @@ def _unknown_verdict(name: str) -> SentinelDecision:
     return SentinelDecision(
         Decision.DENY, Tier.FORBIDDEN, f"unknown tool '{name}' (not registered in toolset)"
     )
+
+
+def _payload_dict(value: Any) -> dict[str, Any]:
+    if hasattr(value, "__dataclass_fields__"):
+        return asdict(value)
+    if isinstance(value, dict):
+        return value
+    raise TypeError(f"approval planner returned unsupported payload: {type(value).__name__}")
+
+
+def _approval_summary(agent: str, tool: Tool, payload: dict[str, Any]) -> str:
+    preview = str(payload.get("preview") or "").strip()
+    if preview:
+        return f"{agent}: {tool.name} approval - {preview[:120]}"
+    return f"{agent}: {tool.action} on {tool.name}"

@@ -20,7 +20,7 @@ Defense in depth on every approved execution:
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - guarded execution, see module docstring
+import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -148,7 +148,7 @@ def _run_in_process(
     timed_out = False
     truncated = False
     try:
-        proc = subprocess.run(  # nosec B603 - args are not shell-interpreted; CWD + env scrubbed
+        proc = subprocess.run(  # nosec B603
             args,
             cwd=str(workspace),
             env=env,
@@ -220,7 +220,7 @@ def _run_in_container(runtime: str, workspace: Path, plan: CodePlan) -> CodeRunR
         "--net=none",
         "--cap-drop=ALL",
         "--read-only",
-        "--tmpfs", "/tmp:rw,size=64m",  # nosec B108 - path inside the container, not host
+        "--tmpfs", "/tmp:rw,size=64m",  # nosec B108
         "-v", f"{str(workspace)}:/work:rw",
         "-w", "/work",
         image,
@@ -228,7 +228,7 @@ def _run_in_container(runtime: str, workspace: Path, plan: CodePlan) -> CodeRunR
     ]
     t0 = time.monotonic()
     try:
-        proc = subprocess.run(  # nosec B603 - explicit argv; container runtime
+        proc = subprocess.run(  # nosec B603
             cmd, capture_output=True, timeout=plan.timeout_seconds, check=False,
         )
         stdout = proc.stdout or b""

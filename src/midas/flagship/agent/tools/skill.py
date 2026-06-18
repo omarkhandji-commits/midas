@@ -33,6 +33,9 @@ class SkillIndexEntry:
     summary: str
     permissions: list[str]
     sha256: str
+    risk: str = "low"
+    tags: list[str] | None = None
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -52,12 +55,17 @@ def skill_index(registry: Any) -> list[SkillIndexEntry]:
         return []
     out: list[SkillIndexEntry] = []
     for manifest in registry.list():
+        if not bool(getattr(manifest, "enabled", True)):
+            continue
         out.append(
             SkillIndexEntry(
                 name=str(getattr(manifest, "name", "")),
                 summary=str(getattr(manifest, "summary", "")),
                 permissions=list(getattr(manifest, "permissions", []) or []),
                 sha256=str(getattr(manifest, "sha256", "")),
+                risk=str(getattr(manifest, "risk", "low")),
+                tags=list(getattr(manifest, "tags", []) or []),
+                enabled=bool(getattr(manifest, "enabled", True)),
             )
         )
     out.sort(key=lambda e: e.name)

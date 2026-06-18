@@ -160,7 +160,7 @@ def web_scrape(
         raise ScrapeError(f"web.scrape needs an absolute http(s) URL, got {url!r}")
     host = parsed.netloc
 
-    chosen_ua = user_agent or random.choice(_USER_AGENTS)  # noqa: S311 — UA pick, not crypto
+    chosen_ua = user_agent or random.choice(_USER_AGENTS)  # nosec B311
 
     if not allow_disallowed and not _check_robots(url, user_agent=chosen_ua):
         raise ScrapeError(
@@ -192,8 +192,8 @@ def web_scrape(
                 # Reasonable viewport jitter — not a fingerprint forge, just
                 # different enough from the Playwright default 800x600 that
                 # naive detectors don't catch us.
-                width = 1280 + random.randrange(0, 200, 40)  # noqa: S311
-                height = 720 + random.randrange(0, 200, 40)  # noqa: S311
+                width = 1280 + random.randrange(0, 200, 40)  # nosec B311
+                height = 720 + random.randrange(0, 200, 40)  # nosec B311
                 context = browser.new_context(
                     user_agent=chosen_ua,
                     viewport={"width": width, "height": height},

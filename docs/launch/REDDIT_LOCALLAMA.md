@@ -1,46 +1,38 @@
-# r/LocalLLaMA post draft — MIDAS
+# r/LocalLLaMA Draft
 
-**Title:** `MIDAS — open-source business agent that runs fully on Ollama, with hash-chained signed receipts you can verify with 100 lines of Python`
+Do not post until the repository is public and the Ollama path has been tested
+from a clean checkout.
 
-**Body:**
+## Title
 
-I've been bothered by how every "autonomous agent" project burns money on the
-loudest cloud model and ships zero audit trail. So I built MIDAS — a local-first
-business operator for founders / consultants / agencies.
+MIDAS: self-hosted LLM agent with Ollama support, approvals, and signed receipts
 
-What I think this sub will care about:
+## Body
 
-- **Runs fully on Ollama.** No vendor lock, no API keys required. Provider-agnostic
-  router; if you have llama3.1 or qwen2.5 running on `127.0.0.1:11434`, you have
-  a working agent. Cloud providers are opt-in, never the default.
-- **Zero telemetry, zero CDN.** Dashboard is loopback-only with a strict CSP. The
-  Python wheel ships every static asset; nothing phones home.
-- **Every tool call writes a signed, hash-chained receipt.** Public spec at
-  `docs/RECEIPT_V1.md`, with deterministic test vectors. A 100-line standalone
-  verifier (`pip install pynacl`) reads your ledger and tells you OK or `bad_seq=N`.
-- **Approval-default**, not a setting. Outbound actions enter an `ApprovalQueue` and
-  a human resolves them from the dashboard, Telegram, Slack, Discord, etc. No
-  full-auto bypass.
-- **Budget fuse fires BEFORE the model call.** You can't blow past your cap on a
-  runaway loop, even with a hosted endpoint.
+I released MIDAS, a local-first AI agent for LLM workflows that need review before
+action. It can run with Ollama, or with cloud providers when you add your own API
+key.
 
-Stack: Python 3.11+, FastAPI, Pydantic, PyNaCl for Ed25519, SQLite WAL, React + Vite
-+ Tailwind for the SPA (built to static, no runtime CDN).
+What may be useful to this community:
 
-I'd love feedback on:
-1. The eval suite (`midas eval` — 9 Proof-First invariants, deterministic, offline).
-2. Receipt v1 — is the canonicalization rule sound? Test vectors are in the spec.
-3. Whether the τ-bench-style rule-adherence subscore I added captures what people
-   here would actually want measured.
+- Local dashboard and CLI.
+- Ollama-first setup path.
+- Approval queue for actions that change files, call services, publish content,
+  or use external tools.
+- Signed receipt ledger with an independent verifier.
+- Budget controls before model calls.
+- MCP-oriented tool workflow support.
 
-Repo: https://github.com/<owner>/<repo>
+Repo: https://github.com/omarkhandji-commits/midas
 
-Not "secure" or "certified" — those are organizational claims. The code does what
-it does; the spec is public; the receipts verify.
+I would value feedback on the install flow, local model setup, approval model,
+and receipt format.
 
----
+Honest notes: MIDAS is pre-1.0. Local media workflows need local tools such as
+Node, ffmpeg, or Remotion. External accounts and cloud providers stay opt-in.
 
-**Posting notes:**
-- Post on a Saturday morning ET (peak local-LLM crowd).
-- Don't crosspost to r/MachineLearning the same day.
-- First top-level comment should drop the Ollama config one-liner.
+## Posting Notes
+
+- Post after the README badges render.
+- Add the Ollama setup command in the first comment.
+- Do not cross-post the same day.

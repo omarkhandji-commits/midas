@@ -57,15 +57,15 @@ def test_provider_key_is_stored_but_never_echoed(tmp_path: Path) -> None:
     client, token, ledger = _client(tmp_path)
     csrf = _sign_in(client, token)
     headers = {"origin": "http://testserver", "x-midas-csrf": csrf}
-    secret = "test-secret-value-never-echoed"
+    canary_value = "provider-canary-never-echoed"
 
     add = client.post(
         "/api/providers",
         headers=headers,
-        json={"provider": "openai", "api_key": secret},
+        json={"provider": "openai", "api_key": canary_value},
     )
     assert add.status_code == 200
-    assert secret not in add.text
+    assert canary_value not in add.text
     payload = add.json()["provider"]
     assert payload["name"] == "openai"
     assert payload["configured"] is True
@@ -74,24 +74,24 @@ def test_provider_key_is_stored_but_never_echoed(tmp_path: Path) -> None:
 
     listed = client.get("/api/providers")
     assert listed.status_code == 200
-    assert secret not in listed.text
+    assert canary_value not in listed.text
     openai = next(p for p in listed.json()["providers"] if p["name"] == "openai")
     assert openai["configured"] is True
 
     dry = client.post("/api/providers/test", headers=headers, json={"provider": "openai"})
     assert dry.status_code == 200
     assert dry.json()["ok"] is True
-    assert secret not in dry.text
+    assert canary_value not in dry.text
     assert client.post("/api/providers/test", headers=headers, json=[]).status_code == 400
 
     receipts_json = "\n".join(r.model_dump_json() for r in ledger)
     assert "providers.add" in receipts_json
-    assert secret not in receipts_json
+    assert canary_value not in receipts_json
 
     removed = client.request("DELETE", "/api/providers/openai", headers=headers)
     assert removed.status_code == 200
     assert removed.json()["provider"]["configured"] is False
-    assert secret not in removed.text
+    assert canary_value not in removed.text
 
 
 def test_settings_round_trip_and_validation(tmp_path: Path) -> None:

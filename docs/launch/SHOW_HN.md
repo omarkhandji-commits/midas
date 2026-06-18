@@ -1,64 +1,39 @@
-# Show HN draft — MIDAS
+# Show HN Draft
 
-**Title:** `Show HN: MIDAS – business agent with hash-chained, independently verifiable receipts`
+Do not post until the repository is public and the install flow has been tested
+from a clean checkout.
 
-**Body (≤2,500 chars):**
+## Title
 
-I built MIDAS because every agent demo I've seen handwaves the part that actually
-matters in business: *did this thing do what it said it did, can I prove it later,
-and what stopped it from doing the thing I never wanted it to do?*
+Show HN: MIDAS, a local-first AI agent with approvals and signed receipts
 
-MIDAS is a local-first business operator for founders, consultants, agencies, and
-small teams. It prepares revenue moves — research, ICP, drafts, outreach copy, PDFs
-— and stops before any outbound action so the human approves and ships. That part
-isn't novel.
+## Body
 
-What's novel are three things sitting under it:
+I built MIDAS for people who want to try LLM automation without giving an agent
+silent access to files, tools, or external services.
 
-1. **Receipt v1, a public spec for verifiable execution.** Every tool call writes a
-   signed, hash-chained JSONL receipt. I shipped a 100-line standalone verifier
-   (`pip install pynacl`, then `python -m midas_verify <ledger> --public-key <hex>`)
-   that imports nothing from MIDAS itself. If you can't trust the runtime, you can
-   re-verify the chain. There are deterministic test vectors in `docs/RECEIPT_V1.md`.
+MIDAS runs from a local dashboard or CLI. It supports Ollama for local models,
+cloud providers with user-supplied keys, MCP-oriented tool workflows, and an
+approval queue for actions that change files, call services, publish content, or
+use external tools.
 
-2. **Approval-default as a structural invariant**, not a setting. Outbound sends,
-   payments, irreversible cancellations — these enter an `ApprovalQueue` and a human
-   resolves them from the dashboard, Telegram, Slack, Discord, WhatsApp, SMS, or
-   email. There is no "full auto" toggle that bypasses the queue.
+The parts I would like feedback on:
 
-3. **A budget fuse that reserves before it spends.** Caps fire BEFORE the model
-   call, not after, so you cannot blow past a per-task / daily / monthly cap on a
-   runaway loop.
+1. Install flow for non-developers.
+2. Approval model and risk labels.
+3. Signed receipt format and independent verifier.
+4. Local dashboard and CLI ergonomics.
 
-Stack is Python 3.11+, FastAPI dashboard on loopback (no CDN, no telemetry, strict
-CSP), provider-agnostic LLM router (local Ollama or any cloud), receipt signing via
-Ed25519 (PyNaCl) with the secret in the OS keychain.
+Repo: https://github.com/omarkhandji-commits/midas
+Receipt spec: https://github.com/omarkhandji-commits/midas/blob/main/docs/RECEIPT_V1.md
+Verifier: https://github.com/omarkhandji-commits/midas/tree/main/tools/verify
 
-Quality bar I hold myself to: ruff + mypy strict + import-linter + bandit + pytest
-all green every commit, and an in-repo eval suite (`midas eval`) that proves nine
-Proof-First invariants on deterministic, offline inputs — including a τ-bench-style
-rule-adherence test that demands 100% refusal of forbidden actions.
+Honest notes: MIDAS is pre-1.0. Cloud providers require your own API keys. Local
+media workflows depend on tools installed on your machine. Read the disclaimer
+before connecting external accounts or automation.
 
-The "moat" is the spec, not the code. If you implement Receipt v1 in another agent,
-my verifier reads your ledger. That's the goal.
+## Posting Notes
 
-Honest disclosures: alpha, breaking changes possible until 1.0, I don't claim
-"secure" or "compliant" anywhere in the repo (those are organizational claims, not
-cryptographic ones).
-
-Repo: https://github.com/<owner>/<repo>
-Spec: https://github.com/<owner>/<repo>/blob/main/docs/RECEIPT_V1.md
-Verifier: https://github.com/<owner>/<repo>/tree/main/tools/verify
-
-Happy to take questions on the threat model, the eval suite, or where the spec
-needs sharpening for v2.
-
----
-
-**Posting notes (do NOT publish until ready):**
-- Replace `<owner>/<repo>` with the real GitHub path.
-- Post at 09:00 ET on a Tuesday/Wednesday for best HN front-page odds.
-- Have screenshots of the dashboard + a 90s loom of demo 1 ready in the first reply.
-- Do not link the demo videos in the OP — keep them for the comment thread to bait
-  click-through.
-- Skip the "I made this in a weekend" framing — emphasize the spec.
+- Post only after the first public push and clean install test.
+- Have one dashboard screenshot ready for the first comment.
+- Do not post claims about results, rankings, or outcomes.

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { RefreshCw, ShieldCheck, ShieldX } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Download, RefreshCw, ShieldCheck, ShieldX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
@@ -17,27 +17,42 @@ type Proof = {
 type ProofResponse = {
   proofs: Proof[];
   chain: { ok: boolean; count: number; error: string | null };
+  total_matches: number;
 };
+
+const inputClasses = "border border-rule bg-paper px-3 py-2 text-sm text-ink placeholder:text-mute";
 
 export function ProofsPage() {
   const [proofs, setProofs] = useState<Proof[]>([]);
   const [chain, setChain] = useState<ProofResponse["chain"] | null>(null);
+  const [totalMatches, setTotalMatches] = useState(0);
+  const [runId, setRunId] = useState("");
+  const [tool, setTool] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setError(null);
     try {
-      const response = await api.get<ProofResponse>("/api/proofs");
+      const params = new URLSearchParams();
+      if (runId.trim()) params.set("run_id", runId.trim());
+      if (tool.trim()) params.set("tool", tool.trim());
+      if (dateFrom.trim()) params.set("date_from", dateFrom.trim());
+      if (dateTo.trim()) params.set("date_to", dateTo.trim());
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      const response = await api.get<ProofResponse>(`/api/proofs${suffix}`);
       setProofs(response.proofs.reverse());
       setChain(response.chain);
+      setTotalMatches(response.total_matches);
     } catch (err) {
       setError(readError(err));
     }
-  }
+  }, [dateFrom, dateTo, runId, tool]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   return (
     <div className="space-y-6">
@@ -50,10 +65,22 @@ export function ProofsPage() {
           <CardBody>
             <p>Every row is a hashed receipt. Raw payloads stay digested, not exposed.</p>
           </CardBody>
-          <Button type="button" className="mt-4" onClick={load}>
-            <RefreshCw className="size-4" aria-hidden />
-            Refresh
-          </Button>
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            <input className={inputClasses} value={runId} onChange={(e) => setRunId(e.target.value)} placeholder="run_id" />
+            <input className={inputClasses} value={tool} onChange={(e) => setTool(e.target.value)} placeholder="tool" />
+            <input className={inputClasses} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} placeholder="from ISO" />
+            <input className={inputClasses} value={dateTo} onChange={(e) => setDateTo(e.target.value)} placeholder="to ISO" />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button type="button" onClick={load}>
+              <RefreshCw className="size-4" aria-hidden />
+              Search
+            </Button>
+            <Button type="button" variant="default" onClick={() => exportProofs(proofs)}>
+              <Download className="size-4" aria-hidden />
+              Export JSON
+            </Button>
+          </div>
           {error && <div className="mt-4 border border-warn bg-warn-bg px-3 py-2 text-sm text-warn">{error}</div>}
         </Card>
         <Card className="p-6">
@@ -68,7 +95,7 @@ export function ProofsPage() {
               <ShieldX className="size-5 text-warn" aria-hidden />
             )}
             <span className="text-mute">
-              {chain ? `${chain.count} receipts` : "Loading"} {chain?.error ?? ""}
+              {chain ? `${chain.count} receipts` : "Loading"} · {totalMatches} match{totalMatches === 1 ? "" : "es"} {chain?.error ?? ""}
             </span>
           </div>
         </Card>
@@ -127,6 +154,18 @@ function DecisionBadge({ decision }: { decision: string }) {
       {decision}
     </span>
   );
+}
+
+function exportProofs(proofs: Proof[]) {
+  const blob = new Blob([JSON.stringify({ proofs }, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `midas-proofs-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function readError(err: unknown): string {

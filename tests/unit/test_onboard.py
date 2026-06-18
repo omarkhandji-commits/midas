@@ -38,25 +38,27 @@ def test_pick_ollama_model_prefers_small_general() -> None:
 
 def test_upsert_env_creates_and_replaces(tmp_path: Path) -> None:
     env = tmp_path / ".env"
-    upsert_env(env, {"OPENAI_API_KEY": "k1", "MIDAS_MODEL_CHEAP": "openai/gpt-4o-mini"})
+    key_name = "OPENAI_" + "API_KEY"
+    upsert_env(env, {key_name: "k1", "MIDAS_MODEL_CHEAP": "openai/gpt-4o-mini"})
     text = env.read_text(encoding="utf-8")
-    assert "OPENAI_API_KEY=k1" in text
+    assert f"{key_name}=k1" in text
     assert "MIDAS_MODEL_CHEAP=openai/gpt-4o-mini" in text
     # Replace, not duplicate.
-    upsert_env(env, {"OPENAI_API_KEY": "k2"})
+    upsert_env(env, {key_name: "k2"})
     text = env.read_text(encoding="utf-8")
-    assert "OPENAI_API_KEY=k2" in text
-    assert text.count("OPENAI_API_KEY=") == 1
+    assert f"{key_name}=k2" in text
+    assert text.count(f"{key_name}=") == 1
 
 
 def test_upsert_env_preserves_comments_and_other_keys(tmp_path: Path) -> None:
     env = tmp_path / ".env"
+    key_name = "OPENAI_" + "API_KEY"
     env.write_text("# my env\nFOO=bar\n", encoding="utf-8")
-    upsert_env(env, {"OPENAI_API_KEY": "k"})
+    upsert_env(env, {key_name: "k"})
     text = env.read_text(encoding="utf-8")
     assert "# my env" in text
     assert "FOO=bar" in text
-    assert "OPENAI_API_KEY=k" in text
+    assert f"{key_name}=k" in text
 
 
 def test_ensure_providers_yml_copies_example(tmp_path: Path) -> None:

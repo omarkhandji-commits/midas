@@ -3,7 +3,7 @@ import { Compass, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 
 type Mission = {
   run_id: string;
@@ -102,7 +102,7 @@ export function MissionsPage() {
                   <Metric label="Score" value={`${mission.daily_move.score}/100`} />
                   <Metric label="Band" value={mission.daily_move.band} />
                   <Metric label="Proof" value={mission.daily_move.proof_level} />
-                  <Metric label="Spent" value={`$${mission.spent_usd.toFixed(4)}`} />
+                  <Metric label="Spent" value={formatCurrency(mission.spent_usd)} />
                 </div>
                 <div>
                   <h2 className="mb-2 text-sm font-semibold">Prepared steps</h2>

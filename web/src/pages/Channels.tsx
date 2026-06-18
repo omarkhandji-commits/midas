@@ -142,6 +142,14 @@ export function ChannelsPage() {
             Owner-gated callbacks use the same ApprovalQueue as the dashboard. Email
             remains draft-only; outbound messages require an approval card.
           </p>
+          <div className="mt-4 border border-rule bg-rule-soft/35 p-3 text-sm text-mute">
+            <p className="font-medium text-ink">Button guide</p>
+            <p className="mt-1">
+              Connect saves this channel locally. Test checks the connection. Refresh
+              rereads status. Remove disconnects the channel. You can skip channels and
+              still approve from the dashboard.
+            </p>
+          </div>
         </CardBody>
         <form className="mt-5 space-y-4" onSubmit={connect}>
           <label className="grid gap-1.5 text-sm font-medium">

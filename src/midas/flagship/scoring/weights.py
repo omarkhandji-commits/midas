@@ -17,7 +17,8 @@ WEIGHTS: dict[str, int] = {
     "operator_fit": 5,
 }
 
-assert sum(WEIGHTS.values()) == 100, "scoring weights must sum to 100"
+if sum(WEIGHTS.values()) != 100:
+    raise RuntimeError("scoring weights must sum to 100")
 
 BUILD_MIN = 75.0
 WATCHLIST_MIN = 60.0

@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
 import { api, type SseFrame } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 
 type Mode = "chat" | "do";
 
@@ -405,7 +405,7 @@ function ProofStrip({ done }: { done: DoneChatFrame }) {
     <div className="grid gap-2 border border-rule bg-rule-soft/35 p-3 text-sm md:grid-cols-3">
       <Metric label="Proof" value={done.proof_level} />
       <Metric label="Sources" value={done.sources.length ? String(done.sources.length) : "none"} />
-      <Metric label="Cost" value={`$${done.cost_usd.toFixed(6)}`} />
+      <Metric label="Cost" value={formatCurrency(done.cost_usd)} />
     </div>
   );
 }
@@ -556,7 +556,7 @@ function isDoneDo(value: unknown): value is DoneDoFrame {
 
 function errorCopy(error: ErrorFrame): string {
   if (error.code === "budget_exceeded") {
-    return `Budget ${error.scope ?? ""} exceeded: $${error.projected ?? 0} > $${error.cap ?? 0}`;
+    return `Budget ${error.scope ?? ""} exceeded: ${formatCurrency(error.projected ?? 0)} > ${formatCurrency(error.cap ?? 0)}`;
   }
   if (error.code === "executor_unavailable") {
     return "Do mode requires the executor — configure providers and reload.";

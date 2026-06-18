@@ -52,6 +52,9 @@ class ApprovalRequest:
     payload: dict[str, Any]
     status: ApprovalStatus
     created_ts: str
+    risk: str = "medium"
+    estimated_cost_usd: float = 0.0
+    expires_ts: str | None = None
     resolved_ts: str | None = None
     resolver: str | None = None
     note: str | None = None
@@ -67,6 +70,9 @@ CREATE TABLE IF NOT EXISTS approvals (
     action       TEXT    NOT NULL,
     summary      TEXT    NOT NULL,
     payload      TEXT    NOT NULL,
+    risk         TEXT    NOT NULL DEFAULT 'medium',
+    estimated_cost_usd REAL NOT NULL DEFAULT 0.0,
+    expires_ts   TEXT,
     status       TEXT    NOT NULL,
     resolved_ts  TEXT,
     resolver     TEXT,
@@ -90,6 +96,7 @@ class ApprovalQueue:
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._migrate_columns()
         self._conn.commit()
         self._ledger = ledger
         # If empty, ANY caller is accepted (single-user dev mode). In production the
@@ -106,22 +113,43 @@ class ApprovalQueue:
         action: str,
         summary: str,
         payload: dict[str, Any] | None = None,
+        risk: str | None = None,
+        estimated_cost_usd: float = 0.0,
+        expires_in: timedelta | None = None,
     ) -> ApprovalRequest:
-        ts = utcnow_iso()
+        created = datetime.now(UTC)
+        ts = created.isoformat()
+        expires_ts = (created + (expires_in or timedelta(hours=24))).isoformat()
+        risk_level = risk or _infer_risk(action=action, tool=tool)
         with self._lock:
             cur = self._conn.execute(
-                "INSERT INTO approvals(created_ts,run_id,agent,tool,action,summary,payload,status) "
-                "VALUES(?,?,?,?,?,?,?,?)",
-                (ts, run_id, agent, tool, action, summary, json.dumps(payload or {}),
-                 ApprovalStatus.PENDING.value),
+                "INSERT INTO approvals("
+                "created_ts,run_id,agent,tool,action,summary,payload,risk,"
+                "estimated_cost_usd,expires_ts,status"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    ts,
+                    run_id,
+                    agent,
+                    tool,
+                    action,
+                    summary,
+                    json.dumps(payload or {}),
+                    risk_level,
+                    float(estimated_cost_usd),
+                    expires_ts,
+                    ApprovalStatus.PENDING.value,
+                ),
             )
             self._conn.commit()
             req_id = cur.lastrowid
-            assert req_id is not None  # AUTOINCREMENT + just-committed INSERT
+            if req_id is None:
+                raise ApprovalError("approval insert did not return an id")
         return ApprovalRequest(
             id=req_id, run_id=run_id, agent=agent, tool=tool, action=action,
             summary=summary, payload=payload or {}, status=ApprovalStatus.PENDING,
-            created_ts=ts,
+            created_ts=ts, risk=risk_level, estimated_cost_usd=float(estimated_cost_usd),
+            expires_ts=expires_ts,
         )
 
     def approve(self, request_id: int, *, by: str, note: str | None = None) -> ApprovalRequest:
@@ -182,7 +210,8 @@ class ApprovalQueue:
             self._conn.commit()
 
         req = self.get(request_id)
-        assert req is not None
+        if req is None:
+            raise ApprovalError(f"approval {request_id} disappeared after resolve")
         if self._ledger is not None:
             decision = Decision.ALLOW if new_status == ApprovalStatus.APPROVED else Decision.DENY
             self._ledger.append(
@@ -199,7 +228,8 @@ class ApprovalQueue:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id,created_ts,run_id,agent,tool,action,summary,payload,status,"
-                "resolved_ts,resolver,note FROM approvals " + where,  # nosec B608
+                "resolved_ts,resolver,note,risk,estimated_cost_usd,expires_ts "
+                "FROM approvals " + where,  # nosec B608
                 params,
             ).fetchall()
         return [
@@ -207,6 +237,32 @@ class ApprovalQueue:
                 id=r[0], created_ts=r[1], run_id=r[2], agent=r[3], tool=r[4], action=r[5],
                 summary=r[6], payload=json.loads(r[7] or "{}"),
                 status=ApprovalStatus(r[8]), resolved_ts=r[9], resolver=r[10], note=r[11],
+                risk=r[12] or "medium", estimated_cost_usd=float(r[13] or 0.0),
+                expires_ts=r[14],
             )
             for r in rows
         ]
+
+    def _migrate_columns(self) -> None:
+        existing = {row[1] for row in self._conn.execute("PRAGMA table_info(approvals)")}
+        columns = {
+            "risk": "TEXT NOT NULL DEFAULT 'medium'",
+            "estimated_cost_usd": "REAL NOT NULL DEFAULT 0.0",
+            "expires_ts": "TEXT",
+        }
+        for name, ddl in columns.items():
+            if name not in existing:
+                self._conn.execute(f"ALTER TABLE approvals ADD COLUMN {name} {ddl}")
+
+
+def _infer_risk(*, action: str, tool: str) -> str:
+    joined = f"{action} {tool}".lower()
+    if any(word in joined for word in ("payment", "stripe", "price", "pay")):
+        return "money"
+    if any(word in joined for word in ("execute", "code", "mcp", "tool")):
+        return "code"
+    if any(word in joined for word in ("send", "email", "publish", "social", "egress")):
+        return "send"
+    if any(word in joined for word in ("write", "repo", "file", "install")):
+        return "write"
+    return "medium"

@@ -67,3 +67,8 @@ earn-proof.html
 proof.html
 out.html
 test-proof.html
+
+# Personal drafts that must never be published.
+plan_7j_generate.md
+reply_denis.txt
+reply_guillaume.txt
