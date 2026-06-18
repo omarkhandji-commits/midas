@@ -7,6 +7,16 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`blog.seo_lint` tool — WS-V foundation, deterministic SEO checklist.**
+  AUTO-tier, pure text, no egress, zero install footprint (regex
+  only). Parses optional YAML-ish front-matter (`title`, `description`)
+  and runs the table-stakes checks: title length (30–60), meta
+  description (70–160), single H1, no heading-level skips, ≥300-word
+  body, every image carries alt text, at least one internal link.
+  Returns a 0–100 score with per-issue severity. Honest: this is the
+  documented Google Search Essentials checklist, NOT a ranking
+  guarantee — we don't call SERP APIs, don't claim "this will rank".
+
 - **`execute_code_edits` executor — Phase 6 step 3, closes the edit loop.**
   Post-approval handler wired into the execute pipeline. Re-runs
   `plan_code_edits` from the canonical `edits` list inside the

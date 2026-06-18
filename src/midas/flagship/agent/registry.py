@@ -33,6 +33,7 @@ from .tools.artifact import (
     plan_artifact_text,
     plan_artifact_voice,
 )
+from .tools.blog_seo import lint_blog
 from .tools.cash import (
     plan_adcopy,
     plan_landing,
@@ -262,6 +263,23 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # blog.seo_lint — AUTO-tier deterministic SEO checklist on markdown.
+    ts.register(
+        Tool(
+            name="blog.seo_lint",
+            action="read_local_files",
+            fn=lambda markdown, title="", meta_description="", site_domain="": (
+                lint_blog(
+                    markdown=markdown,
+                    title=title,
+                    meta_description=meta_description,
+                    site_domain=site_domain,
+                ).to_dict()
+            ),
+            output_taint=Taint.TRUSTED,
+        )
+    )
+
     # code.edit_plan — APPROVE-tier multi-file search/replace.
     # All-or-nothing exact-match. Operator sees per-file LOC delta + sha256
     # of intent. Rebuilt at execute time to refuse drift.
