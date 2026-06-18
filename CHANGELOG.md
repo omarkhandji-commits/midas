@@ -7,6 +7,18 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`code.repo_map` tool — Phase 6 step 1, foundation of the native coder.**
+  AUTO-tier AST walk + import-graph ranking. Uses the stdlib ``ast``
+  module — no tree-sitter native build, no third-party deps. Returns
+  per-file top-level functions, classes, imports, plus an in-degree
+  score (files imported by many others bubble up). The ``top`` field
+  surfaces the most depended-on files for prompt-economical planning.
+  Honest: in-degree ≠ true PageRank — it's the 90%-correct linear-time
+  heuristic. Real PageRank iteration is a future slice. Python-only
+  this slice; JS/TS/Go ranking is additive (the data shape is
+  language-agnostic). NO benchmark claim — Aider Polyglot scoring
+  needs the harness installed and the dataset, both follow-up work.
+
 - **Adapter extensions — IG carousel, YouTube video upload, TikTok status poll.**
   Instagram adapter now publishes multi-image carousels (cap 10, per
   Graph API): one child container per URL, parent CAROUSEL container,

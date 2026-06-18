@@ -54,6 +54,7 @@ from .tools.http import http_fetch
 from .tools.image import plan_image
 from .tools.lead import record_leads
 from .tools.pdf import pdf_extract
+from .tools.repo_map import build_repo_map
 from .tools.sheet import plan_sheet_write, sheet_read
 from .tools.skill import skill_index, skill_load
 from .tools.social import plan_social_publish
@@ -260,6 +261,24 @@ def build_default_toolset(
             output_taint=Taint.TRUSTED,
         )
     )
+    # code.repo_map — AUTO-tier AST walk + import-graph ranking.
+    # Foundation of the Phase 6 native coder: feeds the planner a ranked
+    # list of which files matter most without dumping the whole repo.
+    def _repo_map_payload(subdir: str = ".", top: int = 20) -> dict[str, Any]:
+        rmap = build_repo_map(guard, subdir=subdir)
+        return {
+            **rmap.as_dict(),
+            "top": [f.to_dict() for f in rmap.top(n=int(top))],
+        }
+    ts.register(
+        Tool(
+            name="code.repo_map",
+            action="read_local_files",
+            fn=_repo_map_payload,
+            output_taint=Taint.TRUSTED,
+        )
+    )
+
     # lead.record — AUTO-tier CRM bridge from inbox → MemoryKind.RESULT.
     # Idempotent on (from_addr, uid); writes only when an intent word matches.
     if memory_path is not None:

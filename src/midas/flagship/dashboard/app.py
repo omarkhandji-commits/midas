@@ -2162,6 +2162,7 @@ _CAPABILITY_GROUPS: dict[str, str] = {
     "stripe.": "Cash collection",
     "affiliate.": "Cash collection",
     "lead.": "CRM",
+    "code.repo_map": "Native coder",
     "research.": "Research",
     "web.": "Research",
     "http.": "Research",
