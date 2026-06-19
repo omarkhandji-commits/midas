@@ -167,6 +167,66 @@ class ProviderManager:
             self._wire_cheap_role(name)
         return self.status(name)
 
+    def quick_connect(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model_name: str,
+        role: str = "cheap",
+    ) -> dict[str, Any]:
+        """Wire an arbitrary OpenAI-compatible endpoint (URL + key + model) end-to-end.
+
+        Covers OpenCode-Zen, Groq's OpenAI surface, Together, LM Studio, vLLM, and
+        every gateway that speaks the OpenAI chat-completions wire protocol. The
+        model id is stored as ``openai/<model_name>`` because LiteLLM routes
+        ``openai/*`` against ``OPENAI_API_BASE`` + ``OPENAI_API_KEY`` — exactly the
+        env vars OpenAI-compatible servers expect.
+
+        Side effects, all explicit:
+        - Vault: ``OPENAI_API_KEY`` set to ``api_key``.
+        - Env (and persisted to ``.env`` if ``env_path`` is set): ``OPENAI_API_BASE``,
+          ``OPENAI_API_KEY``, ``MIDAS_MODEL_CHEAP=openai/<model_name>``.
+        - In-memory: ``self.config.roles[role].primary`` becomes ``openai/<model_name>``,
+          taking effect on the next ``router.complete`` call without a restart.
+        """
+        url = base_url.strip()
+        key = api_key.strip()
+        model = model_name.strip()
+        if not url or not key or not model:
+            raise ValueError("base_url, api_key, and model_name are all required")
+        if not url.startswith("https://") and not url.startswith("http://"):
+            raise ValueError("base_url must start with http:// or https://")
+
+        self.vault.set("OPENAI_API_KEY", key)
+        self.vault.set("OPENAI_API_BASE", url)
+        self.env["OPENAI_API_KEY"] = key
+        self.env["OPENAI_API_BASE"] = url
+
+        model_id = f"openai/{model}"
+        current = self.config.roles.get(role)
+        self.config.roles[role] = RoleConfig(
+            primary=model_id,
+            fallbacks=current.fallbacks if current else [],
+        )
+        self.env["MIDAS_MODEL_CHEAP"] = model_id
+
+        if self.env_path is not None:
+            upsert_env(
+                self.env_path,
+                {
+                    "OPENAI_API_BASE": url,
+                    "MIDAS_MODEL_CHEAP": model_id,
+                },
+            )
+
+        return {
+            "ok": True,
+            "role": role,
+            "model": model_id,
+            "base_url": url,
+        }
+
     def _wire_cheap_role(self, name: str) -> None:
         """First-time wiring: point the ``cheap`` role at this provider's default.
 

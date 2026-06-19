@@ -6,6 +6,7 @@ import {
   PlugZap,
   RefreshCw,
   Trash2,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
@@ -47,6 +48,9 @@ export function ProvidersPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [qcUrl, setQcUrl] = useState("");
+  const [qcKey, setQcKey] = useState("");
+  const [qcModel, setQcModel] = useState("");
 
   async function loadProviders() {
     const data = await api.get<ProvidersResponse>("/api/providers");
@@ -94,6 +98,27 @@ export function ProvidersPage() {
     });
   }
 
+  async function quickConnect(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await run(async () => {
+      const response = await api.post<{
+        ok: boolean;
+        role: string;
+        model: string;
+        base_url: string;
+      }>("/api/providers/quick-connect", {
+        base_url: qcUrl,
+        api_key: qcKey,
+        model_name: qcModel,
+      });
+      setQcKey("");
+      setNotice(
+        `Wired ${response.model} via ${response.base_url}. Chat will use it on the next message — no restart needed.`,
+      );
+      await loadProviders();
+    });
+  }
+
   async function removeProvider(name: string) {
     await run(async () => {
       const response = await api.delete<ProviderWriteResponse>(`/api/providers/${name}`);
@@ -117,6 +142,63 @@ export function ProvidersPage() {
 
   return (
     <div className="space-y-6">
+      <Card className="p-6 border-accent/40">
+        <CardHeader>
+          <CardKicker>Quick connect</CardKicker>
+          <CardTitle>Any OpenAI-compatible LLM in one form</CardTitle>
+        </CardHeader>
+        <CardBody className="max-w-none">
+          <p>
+            For OpenCode-Zen, Groq's OpenAI surface, Together, LM Studio, vLLM, or
+            any gateway that speaks the OpenAI chat-completions protocol. Paste the
+            endpoint, your key, and the model id — MIDAS wires the &quot;cheap&quot; role
+            to it instantly.
+          </p>
+        </CardBody>
+        <form className="mt-4 grid gap-3" onSubmit={quickConnect}>
+          <label className="grid gap-1.5 text-sm font-medium">
+            Endpoint URL
+            <input
+              className={inputClasses}
+              value={qcUrl}
+              onChange={(event) => setQcUrl(event.target.value)}
+              placeholder="https://opencode.ai/zen/v1"
+              required
+            />
+          </label>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid gap-1.5 text-sm font-medium">
+              API key
+              <input
+                className={inputClasses}
+                type="password"
+                value={qcKey}
+                onChange={(event) => setQcKey(event.target.value)}
+                autoComplete="off"
+                placeholder="oc-... / sk-... / token"
+                required
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium">
+              Model id
+              <input
+                className={inputClasses}
+                value={qcModel}
+                onChange={(event) => setQcModel(event.target.value)}
+                placeholder="big / gpt-5 / claude-sonnet-4-5 / ..."
+                required
+              />
+            </label>
+          </div>
+          <div>
+            <Button type="submit" variant="primary" disabled={busy}>
+              <Zap className="size-4" aria-hidden />
+              Wire it
+            </Button>
+          </div>
+        </form>
+      </Card>
+
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card className="p-6">
           <CardHeader>
