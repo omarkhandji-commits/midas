@@ -3,11 +3,16 @@
 ![MIDAS logo](docs/assets/midas-agent.png)
 
 [![CI](https://github.com/omarkhandji-commits/midas/actions/workflows/ci.yml/badge.svg)](https://github.com/omarkhandji-commits/midas/actions/workflows/ci.yml)
+[![Cross-platform](https://github.com/omarkhandji-commits/midas/actions/workflows/cross-platform.yml/badge.svg)](https://github.com/omarkhandji-commits/midas/actions/workflows/cross-platform.yml)
 [![CodeQL](https://github.com/omarkhandji-commits/midas/actions/workflows/codeql.yml/badge.svg)](https://github.com/omarkhandji-commits/midas/actions/workflows/codeql.yml)
+[![Lighthouse](https://github.com/omarkhandji-commits/midas/actions/workflows/lighthouse.yml/badge.svg)](https://github.com/omarkhandji-commits/midas/actions/workflows/lighthouse.yml)
+[![A11y](https://github.com/omarkhandji-commits/midas/actions/workflows/a11y.yml/badge.svg)](https://github.com/omarkhandji-commits/midas/actions/workflows/a11y.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-python%20%2B%20web-success)](#testing)
+[![Tests](https://img.shields.io/badge/tests-718%20passing-success)](#testing)
 [![Type-checked](https://img.shields.io/badge/typed-mypy-blue)](pyproject.toml)
+
+> **Demo (15 s):** *coming — see [tools/record_demo.md](tools/record_demo.md) to record it locally and drop the file at `docs/assets/midas-demo.gif`.*
 
 Local-first AI agent for approval-gated automation and verifiable LLM workflows.
 
@@ -43,6 +48,21 @@ generated content, automation, or third-party tools.
   and third-party tool output cannot become instructions.
 - Uses a lightweight skill index and loads `SKILL.md` only when needed.
 - Links receipts to operator-recorded outcomes so runs can be reviewed later.
+
+## Screenshots
+
+| Chat | Approvals | Proof Ledger |
+|---|---|---|
+| ![Chat](docs/assets/screenshot-chat.png) | ![Approvals](docs/assets/screenshot-approvals.png) | ![Proofs](docs/assets/screenshot-proofs.png) |
+
+## Status
+
+- ✅ **Code gates** — 718 tests, mypy strict (157 files), ruff, import-linter contract `core ↛ flagship`, bandit medium+, ShipVitals `READY p0=0 p1=0`.
+- ✅ **Secret scan** — clean.
+- ⏳ **Human UAT** — see [docs/UAT_CHECKLIST.md](docs/UAT_CHECKLIST.md), unsigned at first release.
+- ⏳ **Lighthouse + axe-core (WCAG 2.2 AA)** — workflows wired, first results pending after `v0.1.0`.
+- ⏳ **Cross-platform** — Linux/macOS/Windows × Python 3.11/3.12 matrix runs via the [Cross-platform](https://github.com/omarkhandji-commits/midas/actions/workflows/cross-platform.yml) workflow.
+- ❌ **Independent third-party security review** — not yet performed. Until that lands, MIDAS is *local-first, approval-gated, with security defaults*. It is **not** described as "secure", "certified", or "production-ready".
 
 ## Use Cases
 

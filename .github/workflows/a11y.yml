@@ -1,0 +1,64 @@
+name: A11y
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a11y-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  axe:
+    name: axe-core · WCAG 2.2 AA scan (login page)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,web]"
+
+      - name: Build SPA
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Install axe-core CLI
+        run: npm install -g @axe-core/cli
+
+      - name: Start demo dashboard
+        run: |
+          MIDAS_DEMO=1 python -m midas.flagship.dashboard &
+          echo "DASH_PID=$!" >> $GITHUB_ENV
+          for i in {1..30}; do
+            curl -sf http://127.0.0.1:8765/login > /dev/null && break
+            sleep 1
+          done
+
+      - name: Run axe (login page — pre-auth surface)
+        run: |
+          axe http://127.0.0.1:8765/login \
+            --tags wcag2a,wcag2aa,wcag21a,wcag21aa,wcag22aa \
+            --exit || true
+
+      - name: Stop dashboard
+        if: always()
+        run: kill $DASH_PID || true
