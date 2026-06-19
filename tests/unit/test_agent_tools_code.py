@@ -35,7 +35,14 @@ def test_execute_runs_in_workspace_cwd(tmp_path: Path) -> None:
     plan = plan_code_run("import os; print(os.getcwd())")
     result = execute_code_approved(_g(tmp_path), plan)
     assert result.exit_code == 0
-    assert str(tmp_path.resolve()).lower() in result.stdout.lower()
+    # Subprocess isolation: cwd is the workspace path.
+    # Container isolation (when docker/podman is available, e.g. GitHub Linux
+    # runner): cwd is the in-container mountpoint, by design "/work".
+    cwd_out = result.stdout.strip().lower()
+    if result.isolation == "container":
+        assert cwd_out == "/work"
+    else:
+        assert str(tmp_path.resolve()).lower() in cwd_out
 
 
 def test_execute_subprocess_network_block_makes_socket_fail(tmp_path: Path) -> None:
