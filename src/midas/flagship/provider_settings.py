@@ -138,7 +138,23 @@ class ProviderManager:
             "has_base_url": has_base_url,
             "notes": status.notes,
             "source": self._source(name, api_key_env, base_url_env),
+            "tagline": spec.tagline if spec else "",
+            "base_url_default": spec.base_url_default if spec else None,
         }
+
+    def active_models(self) -> dict[str, str]:
+        """Return the model id currently wired for each role.
+
+        UI surfaces this as a "currently using" badge so the operator always knows
+        which LLM is actually responding — no silent dead-end where a key is
+        stored but the role still points at a different (unreachable) provider.
+        """
+        env_cheap = self.env.get("MIDAS_MODEL_CHEAP", "").strip()
+        cheap_role = self.config.roles.get("cheap")
+        cheap = env_cheap or (cheap_role.primary if cheap_role else "")
+        smart_role = self.config.roles.get("smart")
+        smart = smart_role.primary if smart_role else ""
+        return {"cheap": cheap, "smart": smart}
 
     def add(
         self,
@@ -157,12 +173,28 @@ class ProviderManager:
             self.vault.set(api_key_env, api_key.strip())
         elif api_key and not api_key_env:
             raise ValueError(f"{name} does not accept an API key")
+
+        # Auto-fill the URL for providers with a stable hosted endpoint (e.g.
+        # OpenCode-Zen). The operator only has to paste a key.
+        if not base_url and spec is not None and spec.base_url_default and base_url_env:
+            base_url = spec.base_url_default
         if base_url and base_url_env:
             self.vault.set(base_url_env, base_url.strip())
         elif base_url and not base_url_env:
             raise ValueError(f"{name} does not accept a base URL")
 
         self.apply_to_environment()
+
+        # OpenAI-compatible providers route through LiteLLM with model id
+        # "openai/<m>", which reads OPENAI_API_BASE + OPENAI_API_KEY. Mirror
+        # the just-saved key/URL onto those env names so the next chat call
+        # actually reaches the configured endpoint.
+        if api_key and spec is not None and spec.base_url_default:
+            self.env["OPENAI_API_BASE"] = spec.base_url_default
+            self.env["OPENAI_API_KEY"] = api_key.strip()
+            self.vault.set("OPENAI_API_BASE", spec.base_url_default)
+            self.vault.set("OPENAI_API_KEY", api_key.strip())
+
         if api_key:
             self._wire_cheap_role(name)
         return self.status(name)

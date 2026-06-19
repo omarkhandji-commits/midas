@@ -17,6 +17,18 @@ DEFAULT_CHEAP_MODEL: dict[str, str] = {
     "openrouter": "openrouter/auto",
     "groq": "groq/llama-3.1-8b-instant",
     "google": "gemini/gemini-1.5-flash",
+    # OpenCode-Zen routes via the OpenAI wire protocol — LiteLLM uses
+    # OPENAI_API_BASE + OPENAI_API_KEY for any model id starting with "openai/".
+    # The ProviderManager copies the OpenCode-Zen key/URL onto those env names
+    # in apply_to_environment.
+    "opencode_zen": "openai/grok-code-fast-1",
+    "deepseek": "deepseek/deepseek-chat",
+    "mistral": "mistral/mistral-small-latest",
+    "together": "together_ai/meta-llama/Llama-3.1-8B-Instruct-Turbo",
+    "perplexity": "perplexity/llama-3.1-sonar-small-128k-online",
+    "xai": "xai/grok-2-latest",
+    "cerebras": "cerebras/llama3.1-8b",
+    "fireworks": "fireworks_ai/accounts/fireworks/models/llama-v3p1-8b-instruct",
 }
 
 

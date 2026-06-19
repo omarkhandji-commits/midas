@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  Cpu,
   KeyRound,
   PlugZap,
   RefreshCw,
@@ -25,9 +27,14 @@ type ProviderStatus = {
   has_base_url: boolean;
   notes: string;
   source: string;
+  tagline: string;
+  base_url_default: string | null;
 };
 
-type ProvidersResponse = { providers: ProviderStatus[] };
+type ProvidersResponse = {
+  providers: ProviderStatus[];
+  active_models: { cheap: string; smart: string };
+};
 type ProviderWriteResponse = { ok: boolean; provider: ProviderStatus };
 type ProviderTestResponse = {
   provider: string;
@@ -38,67 +45,94 @@ type ProviderTestResponse = {
   cost_usd: number;
 };
 
+// Curated list of providers shown as primary "1-click connect" cards.
+// Order matters — most user-friendly first.
+const CARD_ORDER: string[] = [
+  "ollama",
+  "openai",
+  "anthropic",
+  "opencode_zen",
+  "openrouter",
+  "groq",
+  "deepseek",
+  "google",
+  "mistral",
+];
+
 export function ProvidersPage() {
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
-  const [selected, setSelected] = useState("openai");
-  const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [model, setModel] = useState("");
-  const [live, setLive] = useState(false);
+  const [activeCheap, setActiveCheap] = useState("");
+  const [activeForKey, setActiveForKey] = useState<string | null>(null);
+  const [keyInput, setKeyInput] = useState("");
+  const [urlInput, setUrlInput] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advProvider, setAdvProvider] = useState("openai_compatible");
+  const [advKey, setAdvKey] = useState("");
+  const [advUrl, setAdvUrl] = useState("");
+  const [advModel, setAdvModel] = useState("");
+  const [testModel, setTestModel] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [qcUrl, setQcUrl] = useState("");
-  const [qcKey, setQcKey] = useState("");
-  const [qcModel, setQcModel] = useState("");
 
   async function loadProviders() {
     const data = await api.get<ProvidersResponse>("/api/providers");
     setProviders(data.providers);
-    if (!data.providers.some((p) => p.name === selected) && data.providers[0]) {
-      setSelected(data.providers[0].name);
-    }
+    setActiveCheap(data.active_models?.cheap ?? "");
   }
 
   useEffect(() => {
     loadProviders().catch((err: unknown) => setError(readError(err)));
-    // Initial load only; user selection is handled after the fetch resolves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const current = useMemo(
-    () => providers.find((provider) => provider.name === selected),
-    [providers, selected],
-  );
-  const configuredCount = providers.filter((provider) => provider.configured).length;
+  const cardProviders = useMemo(() => {
+    const byName = new Map(providers.map((p) => [p.name, p]));
+    return CARD_ORDER.map((n) => byName.get(n)).filter(Boolean) as ProviderStatus[];
+  }, [providers]);
+  const configuredCount = providers.filter((p) => p.configured).length;
+  const activeProviderName = useMemo(() => {
+    if (!activeCheap.includes("/")) return "";
+    return activeCheap.split("/")[0];
+  }, [activeCheap]);
 
-  async function saveProvider(event: FormEvent<HTMLFormElement>) {
+  function openConnect(p: ProviderStatus) {
+    setActiveForKey(p.name);
+    setKeyInput("");
+    setUrlInput(p.base_url_default ?? "");
+    setError(null);
+    setNotice(null);
+  }
+
+  async function submitConnect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!activeForKey) return;
     await run(async () => {
       const response = await api.post<ProviderWriteResponse>("/api/providers", {
-        provider: selected,
-        api_key: apiKey || undefined,
-        base_url: baseUrl || undefined,
+        provider: activeForKey,
+        api_key: keyInput || undefined,
+        base_url: urlInput || undefined,
       });
-      setApiKey("");
-      setNotice(`${response.provider.label} saved. Secret values were not returned.`);
+      setKeyInput("");
+      setActiveForKey(null);
+      setNotice(
+        `${response.provider.label} connected. Chat will use it on the next message.`,
+      );
       await loadProviders();
     });
   }
 
-  async function testProvider() {
+  async function useLocalOllama() {
     await run(async () => {
-      const response = await api.post<ProviderTestResponse>("/api/providers/test", {
-        provider: selected,
-        live,
-        model: model || undefined,
+      await api.post<ProviderWriteResponse>("/api/providers", {
+        provider: "ollama",
       });
-      setNotice(`${response.provider}: ${response.message}`);
+      setNotice("Ollama set as the active LLM. Make sure the server is running on :11434.");
       await loadProviders();
     });
   }
 
-  async function quickConnect(event: FormEvent<HTMLFormElement>) {
+  async function submitAdvanced(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await run(async () => {
       const response = await api.post<{
@@ -107,13 +141,13 @@ export function ProvidersPage() {
         model: string;
         base_url: string;
       }>("/api/providers/quick-connect", {
-        base_url: qcUrl,
-        api_key: qcKey,
-        model_name: qcModel,
+        base_url: advUrl,
+        api_key: advKey,
+        model_name: advModel,
       });
-      setQcKey("");
+      setAdvKey("");
       setNotice(
-        `Wired ${response.model} via ${response.base_url}. Chat will use it on the next message — no restart needed.`,
+        `Wired ${response.model} via ${response.base_url}. Chat will use it on the next message.`,
       );
       await loadProviders();
     });
@@ -122,8 +156,20 @@ export function ProvidersPage() {
   async function removeProvider(name: string) {
     await run(async () => {
       const response = await api.delete<ProviderWriteResponse>(`/api/providers/${name}`);
-      setNotice(`${response.provider.label} removed from the local vault.`);
+      setNotice(`${response.provider.label} removed from the keychain.`);
       await loadProviders();
+    });
+  }
+
+  async function testActive() {
+    await run(async () => {
+      const provider = activeProviderName || "ollama";
+      const response = await api.post<ProviderTestResponse>("/api/providers/test", {
+        provider,
+        live: true,
+        model: testModel || activeCheap || undefined,
+      });
+      setNotice(`${response.provider}: ${response.message}`);
     });
   }
 
@@ -142,159 +188,40 @@ export function ProvidersPage() {
 
   return (
     <div className="space-y-6">
-      <Card className="p-6 border-accent/40">
-        <CardHeader>
-          <CardKicker>Quick connect</CardKicker>
-          <CardTitle>Any OpenAI-compatible LLM in one form</CardTitle>
-        </CardHeader>
-        <CardBody className="max-w-none">
-          <p>
-            For OpenCode-Zen, Groq's OpenAI surface, Together, LM Studio, vLLM, or
-            any gateway that speaks the OpenAI chat-completions protocol. Paste the
-            endpoint, your key, and the model id — MIDAS wires the &quot;cheap&quot; role
-            to it instantly.
-          </p>
-        </CardBody>
-        <form className="mt-4 grid gap-3" onSubmit={quickConnect}>
-          <label className="grid gap-1.5 text-sm font-medium">
-            Endpoint URL
-            <input
-              className={inputClasses}
-              value={qcUrl}
-              onChange={(event) => setQcUrl(event.target.value)}
-              placeholder="https://opencode.ai/zen/v1"
-              required
-            />
-          </label>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-1.5 text-sm font-medium">
-              API key
-              <input
-                className={inputClasses}
-                type="password"
-                value={qcKey}
-                onChange={(event) => setQcKey(event.target.value)}
-                autoComplete="off"
-                placeholder="oc-... / sk-... / token"
-                required
-              />
-            </label>
-            <label className="grid gap-1.5 text-sm font-medium">
-              Model id
-              <input
-                className={inputClasses}
-                value={qcModel}
-                onChange={(event) => setQcModel(event.target.value)}
-                placeholder="big / gpt-5 / claude-sonnet-4-5 / ..."
-                required
-              />
-            </label>
-          </div>
-          <div>
-            <Button type="submit" variant="primary" disabled={busy}>
-              <Zap className="size-4" aria-hidden />
-              Wire it
-            </Button>
-          </div>
-        </form>
-      </Card>
-
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <Card className="p-6">
+        <Card className="p-6 border-accent/30">
           <CardHeader>
-            <CardKicker>Providers & Keys</CardKicker>
-            <CardTitle>Connect your AI</CardTitle>
+            <CardKicker>Active LLM</CardKicker>
+            <CardTitle className="flex items-center gap-2">
+              <Cpu className="size-5 text-accent" aria-hidden />
+              {activeCheap || "Not configured"}
+            </CardTitle>
           </CardHeader>
           <CardBody className="max-w-none">
             <p>
-              Paste a key or local endpoint once. MIDAS stores it in the OS keychain,
-              forwards only status to the browser, and keeps raw secrets out of model context.
+              This is the model MIDAS uses for chat, drafts, and scans. Pick another from the
+              cards below — your key is saved in the OS keychain, never sent to your browser.
             </p>
-            <div className="mt-4 border border-rule bg-rule-soft/35 p-3 text-sm text-mute">
-              <p className="font-medium text-ink">Button guide</p>
-              <p className="mt-1">
-                Save to keychain stores the key locally. Test checks that MIDAS can call
-                the provider. Refresh rereads local status. Remove deletes the saved
-                connection.
-              </p>
-            </div>
           </CardBody>
-          <form className="mt-6 grid gap-4" onSubmit={saveProvider}>
-            <label className="grid gap-1.5 text-sm font-medium">
-              Provider
-              <select
+          <div className="mt-4 flex flex-wrap items-end gap-2">
+            <label className="grid flex-1 gap-1.5 text-sm font-medium">
+              Live-test model id (optional)
+              <input
                 className={inputClasses}
-                value={selected}
-                onChange={(event) => setSelected(event.target.value)}
-              >
-                {providers.map((provider) => (
-                  <option key={provider.name} value={provider.name}>
-                    {provider.label}
-                  </option>
-                ))}
-              </select>
+                value={testModel}
+                onChange={(e) => setTestModel(e.target.value)}
+                placeholder={activeCheap || "ollama/llama3.1:8b"}
+              />
             </label>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="grid gap-1.5 text-sm font-medium">
-                API key
-                <input
-                  className={inputClasses}
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  disabled={!current?.api_key_env}
-                  autoComplete="off"
-                  placeholder={current?.api_key_env ?? "No key required"}
-                />
-              </label>
-              <label className="grid gap-1.5 text-sm font-medium">
-                Base URL
-                <input
-                  className={inputClasses}
-                  value={baseUrl}
-                  onChange={(event) => setBaseUrl(event.target.value)}
-                  disabled={!current?.base_url_env}
-                  placeholder={current?.base_url_env ?? "Managed by provider"}
-                />
-              </label>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-              <label className="grid gap-1.5 text-sm font-medium">
-                Live-test model
-                <input
-                  className={inputClasses}
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  placeholder="ollama/llama3.1 or openai/gpt-4o-mini"
-                />
-              </label>
-              <label className="flex h-9 items-center gap-2 text-sm text-mute">
-                <input
-                  type="checkbox"
-                  checked={live}
-                  onChange={(event) => setLive(event.target.checked)}
-                />
-                Live provider call
-              </label>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" variant="primary" disabled={busy}>
-                <KeyRound className="size-4" aria-hidden />
-                Save to keychain
-              </Button>
-              <Button type="button" disabled={busy} onClick={testProvider}>
-                <PlugZap className="size-4" aria-hidden />
-                Test
-              </Button>
-              <Button type="button" variant="ghost" disabled={busy} onClick={() => run(loadProviders)}>
-                <RefreshCw className="size-4" aria-hidden />
-                Refresh
-              </Button>
-            </div>
-          </form>
+            <Button type="button" disabled={busy} onClick={testActive}>
+              <PlugZap className="size-4" aria-hidden />
+              Test active
+            </Button>
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => run(loadProviders)}>
+              <RefreshCw className="size-4" aria-hidden />
+              Refresh
+            </Button>
+          </div>
         </Card>
 
         <Card className="p-6">
@@ -304,74 +231,231 @@ export function ProvidersPage() {
           </CardHeader>
           <CardBody>
             <p>
-              Local models count as ready when their default endpoint is usable. Cloud providers
-              require a key in the keychain or environment.
+              Local models count as ready when their default endpoint is up. Cloud providers
+              require a key in the keychain.
             </p>
           </CardBody>
-          {current && (
-            <dl className="mt-5 space-y-3 text-sm">
-              <InfoRow label="Selected" value={current.label} />
-              <InfoRow label="Source" value={current.source} />
-              <InfoRow label="API env" value={current.api_key_env ?? "none"} />
-              <InfoRow label="Base URL env" value={current.base_url_env ?? "none"} />
-            </dl>
-          )}
         </Card>
       </section>
 
       <StatusLine error={error} notice={notice} />
 
-      <Card className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead className="border-b border-rule bg-rule-soft/50 text-left font-mono text-[11px] uppercase tracking-[0.08em] text-mute">
-              <tr>
-                <th className="px-4 py-3 font-medium">Provider</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Source</th>
-                <th className="px-4 py-3 font-medium">Missing</th>
-                <th className="px-4 py-3 font-medium">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {providers.map((provider) => (
-                <tr key={provider.name} className="border-b border-rule last:border-b-0">
-                  <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      className="text-left font-medium text-ink hover:text-accent"
-                      onClick={() => setSelected(provider.name)}
-                    >
-                      {provider.label}
-                    </button>
-                    <div className="mt-0.5 font-mono text-xs text-mute">{provider.name}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <ProviderBadge configured={provider.configured} local={provider.local} />
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-mute">{provider.source}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-mute">
-                    {provider.missing.length ? provider.missing.join(", ") : "none"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy || provider.source === "local-default"}
-                      onClick={() => removeProvider(provider.name)}
-                    >
-                      <Trash2 className="size-3.5" aria-hidden />
-                      Remove
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <section>
+        <h2 className="mb-3 font-display text-lg font-medium">Choose your AI</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {cardProviders.map((p) => (
+            <ProviderCard
+              key={p.name}
+              provider={p}
+              active={p.name === activeProviderName}
+              busy={busy}
+              onConnect={() => openConnect(p)}
+              onUseLocal={p.name === "ollama" ? useLocalOllama : undefined}
+              onRemove={() => removeProvider(p.name)}
+            />
+          ))}
         </div>
-      </Card>
+      </section>
+
+      {activeForKey && (
+        <Card className="p-6 border-accent">
+          <CardHeader>
+            <CardKicker>Connect</CardKicker>
+            <CardTitle>{cardProviders.find((p) => p.name === activeForKey)?.label}</CardTitle>
+          </CardHeader>
+          <form className="mt-3 grid gap-3" onSubmit={submitConnect}>
+            <label className="grid gap-1.5 text-sm font-medium">
+              API key
+              <input
+                className={inputClasses}
+                type="password"
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                placeholder="paste it here"
+                autoComplete="off"
+                required
+                autoFocus
+              />
+            </label>
+            {!cardProviders.find((p) => p.name === activeForKey)?.base_url_default && (
+              <label className="grid gap-1.5 text-sm font-medium">
+                Base URL (optional, only for custom hosts)
+                <input
+                  className={inputClasses}
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  placeholder="leave empty for the default"
+                />
+              </label>
+            )}
+            <div className="flex gap-2">
+              <Button type="submit" variant="primary" disabled={busy}>
+                <KeyRound className="size-4" aria-hidden />
+                Save to keychain
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setActiveForKey(null)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      <section>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 font-mono text-xs uppercase tracking-[0.08em] text-mute hover:text-ink"
+          onClick={() => setAdvancedOpen((o) => !o)}
+        >
+          <ChevronDown
+            className={cn("size-3.5 transition-transform", advancedOpen && "rotate-180")}
+            aria-hidden
+          />
+          Advanced — connect any other OpenAI-compatible LLM
+        </button>
+
+        {advancedOpen && (
+          <Card className="mt-3 p-6">
+            <CardHeader>
+              <CardKicker>Power user</CardKicker>
+              <CardTitle>One form, any endpoint</CardTitle>
+            </CardHeader>
+            <CardBody className="max-w-none">
+              <p>
+                For LM Studio, vLLM, Together, custom gateways, or any HTTP server that speaks
+                the OpenAI chat-completions wire protocol.
+              </p>
+            </CardBody>
+            <form className="mt-3 grid gap-3" onSubmit={submitAdvanced}>
+              <label className="grid gap-1.5 text-sm font-medium">
+                Endpoint URL
+                <input
+                  className={inputClasses}
+                  value={advUrl}
+                  onChange={(e) => setAdvUrl(e.target.value)}
+                  placeholder="https://api.example.com/v1"
+                  required
+                />
+              </label>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-1.5 text-sm font-medium">
+                  API key
+                  <input
+                    className={inputClasses}
+                    type="password"
+                    value={advKey}
+                    onChange={(e) => setAdvKey(e.target.value)}
+                    autoComplete="off"
+                    required
+                  />
+                </label>
+                <label className="grid gap-1.5 text-sm font-medium">
+                  Model id
+                  <input
+                    className={inputClasses}
+                    value={advModel}
+                    onChange={(e) => setAdvModel(e.target.value)}
+                    placeholder="gpt-4o-mini / llama3.1:8b / ..."
+                    required
+                  />
+                </label>
+              </div>
+              <div>
+                <Button type="submit" variant="primary" disabled={busy}>
+                  <Zap className="size-4" aria-hidden />
+                  Wire it
+                </Button>
+              </div>
+            </form>
+
+            <h3 className="mt-6 mb-2 font-display text-sm font-medium">
+              Other providers ({providers.length - cardProviders.length} more)
+            </h3>
+            <select
+              className={inputClasses}
+              value={advProvider}
+              onChange={(e) => setAdvProvider(e.target.value)}
+            >
+              {providers
+                .filter((p) => !CARD_ORDER.includes(p.name))
+                .map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.label} {p.configured ? "(connected)" : ""}
+                  </option>
+                ))}
+            </select>
+          </Card>
+        )}
+      </section>
     </div>
+  );
+}
+
+function ProviderCard({
+  provider,
+  active,
+  busy,
+  onConnect,
+  onUseLocal,
+  onRemove,
+}: {
+  provider: ProviderStatus;
+  active: boolean;
+  busy: boolean;
+  onConnect: () => void;
+  onUseLocal?: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <Card
+      className={cn(
+        "flex flex-col p-4",
+        active && "border-accent bg-rule-soft/40",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-display text-base font-medium">{provider.label}</div>
+          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-mute">
+            {provider.name}
+          </div>
+        </div>
+        <ProviderBadge configured={provider.configured} local={provider.local} active={active} />
+      </div>
+      {provider.tagline && (
+        <p className="mt-2 text-sm text-mute">{provider.tagline}</p>
+      )}
+      <div className="mt-auto flex gap-2 pt-3">
+        {onUseLocal && (
+          <Button type="button" variant="primary" size="sm" disabled={busy} onClick={onUseLocal}>
+            <Cpu className="size-3.5" aria-hidden />
+            Use local
+          </Button>
+        )}
+        {provider.api_key_env && (
+          <Button
+            type="button"
+            variant={provider.configured ? "ghost" : "primary"}
+            size="sm"
+            disabled={busy}
+            onClick={onConnect}
+          >
+            <KeyRound className="size-3.5" aria-hidden />
+            {provider.configured ? "Update key" : "Connect"}
+          </Button>
+        )}
+        {provider.configured && provider.source !== "local-default" && (
+          <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onRemove}>
+            <Trash2 className="size-3.5" aria-hidden />
+          </Button>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -379,32 +463,39 @@ const inputClasses =
   "h-9 border border-rule bg-paper px-3 text-sm text-ink placeholder:text-mute " +
   "disabled:cursor-not-allowed disabled:opacity-55";
 
-function ProviderBadge({ configured, local }: { configured: boolean; local: boolean }) {
+function ProviderBadge({
+  configured,
+  local,
+  active,
+}: {
+  configured: boolean;
+  local: boolean;
+  active: boolean;
+}) {
+  if (active) {
+    return (
+      <span className="inline-flex items-center gap-1 border border-accent bg-accent/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] text-accent">
+        <Cpu className="size-3" aria-hidden />
+        Active
+      </span>
+    );
+  }
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 border px-2 py-1 font-mono text-xs",
+        "inline-flex items-center gap-1 border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em]",
         configured
           ? "border-accent text-accent bg-ok-bg"
-          : "border-warn text-warn bg-warn-bg",
+          : "border-rule text-mute",
       )}
     >
       {configured ? (
-        <CheckCircle2 className="size-3.5" aria-hidden />
+        <CheckCircle2 className="size-3" aria-hidden />
       ) : (
-        <AlertTriangle className="size-3.5" aria-hidden />
+        <AlertTriangle className="size-3" aria-hidden />
       )}
-      {configured ? (local ? "local ready" : "ready") : "missing"}
+      {configured ? (local ? "local ready" : "ready") : "no key"}
     </span>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-rule pb-2">
-      <dt className="text-mute">{label}</dt>
-      <dd className="font-mono text-xs text-ink">{value}</dd>
-    </div>
   );
 }
 

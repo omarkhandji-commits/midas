@@ -22,6 +22,13 @@ class ProviderSpec:
     base_url_env: str | None = None
     local: bool = False
     notes: str = ""
+    # Built-in base URL — when set, the operator only needs to paste a key,
+    # the URL is filled in automatically. Used for OpenAI-compatible third-party
+    # endpoints with a stable hosted address (OpenCode-Zen, future presets).
+    base_url_default: str | None = None
+    # One-line consumer description shown on provider cards. Plain language;
+    # no jargon — the audience is non-engineers who just want a working LLM.
+    tagline: str = ""
 
 
 @dataclass(frozen=True)
@@ -35,8 +42,14 @@ class ProviderStatus:
 
 def catalog() -> dict[str, ProviderSpec]:
     specs = [
-        ProviderSpec("openai", "OpenAI", "OPENAI_API_KEY"),
-        ProviderSpec("anthropic", "Anthropic Claude", "ANTHROPIC_API_KEY"),
+        ProviderSpec(
+            "openai", "OpenAI", "OPENAI_API_KEY",
+            tagline="GPT-4o-mini & GPT-5 family. Paste an sk-… key.",
+        ),
+        ProviderSpec(
+            "anthropic", "Anthropic Claude", "ANTHROPIC_API_KEY",
+            tagline="Claude family. Paste an sk-ant-… key.",
+        ),
         ProviderSpec("google", "Google Gemini AI Studio", "GEMINI_API_KEY"),
         ProviderSpec("azure", "Azure OpenAI", "AZURE_API_KEY", "AZURE_API_BASE"),
         ProviderSpec("vertex", "Google Vertex AI", None, "VERTEX_PROJECT"),
@@ -44,8 +57,19 @@ def catalog() -> dict[str, ProviderSpec]:
         ProviderSpec("mistral", "Mistral", "MISTRAL_API_KEY"),
         ProviderSpec("groq", "Groq", "GROQ_API_KEY"),
         ProviderSpec("together", "Together AI", "TOGETHER_API_KEY"),
-        ProviderSpec("openrouter", "OpenRouter", "OPENROUTER_API_KEY"),
-        ProviderSpec("deepseek", "DeepSeek", "DEEPSEEK_API_KEY"),
+        ProviderSpec(
+            "openrouter", "OpenRouter", "OPENROUTER_API_KEY",
+            tagline="One key, 100+ models routed for you.",
+        ),
+        ProviderSpec(
+            "opencode_zen", "OpenCode-Zen", "OPENCODE_ZEN_API_KEY",
+            base_url_default="https://opencode.ai/zen/v1",
+            tagline="Coding-tuned LLMs from sst/opencode.ai. Paste your zen key.",
+        ),
+        ProviderSpec(
+            "deepseek", "DeepSeek", "DEEPSEEK_API_KEY",
+            tagline="Strong code+math models, very cheap.",
+        ),
         ProviderSpec("cohere", "Cohere", "COHERE_API_KEY"),
         ProviderSpec("perplexity", "Perplexity", "PERPLEXITY_API_KEY"),
         ProviderSpec("xai", "xAI", "XAI_API_KEY"),

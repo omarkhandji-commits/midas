@@ -1199,7 +1199,13 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         _require_session(request)
         if deps.providers is None:
             return _json(503, {"error": "providers disabled"})
-        return _json(200, {"providers": deps.providers.list_statuses()})
+        return _json(
+            200,
+            {
+                "providers": deps.providers.list_statuses(),
+                "active_models": deps.providers.active_models(),
+            },
+        )
 
     @app.post("/api/providers")
     async def api_provider_add(request: Request) -> Response:
