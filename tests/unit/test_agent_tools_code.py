@@ -48,7 +48,7 @@ def test_execute_runs_in_workspace_cwd(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(
     sys.platform == "win32" and os.environ.get("CI") == "true",
-    reason="Docker Desktop on Windows CI lacks --read-only support; subprocess fallback is the real surface",
+    reason="Docker Desktop on Windows CI lacks --read-only; subprocess path is the real surface",
 )
 def test_execute_subprocess_network_block_makes_socket_fail(tmp_path: Path) -> None:
     plan = plan_code_run(
@@ -66,7 +66,7 @@ def test_execute_subprocess_network_block_makes_socket_fail(tmp_path: Path) -> N
 
 @pytest.mark.skipif(
     sys.platform == "win32" and os.environ.get("CI") == "true",
-    reason="Docker Desktop on Windows CI lacks --read-only support; subprocess fallback is the real surface",
+    reason="Docker Desktop on Windows CI lacks --read-only; subprocess path is the real surface",
 )
 def test_execute_timeout_fires_quickly(tmp_path: Path) -> None:
     plan = plan_code_run("import time; time.sleep(5)", timeout=0.5)
@@ -77,7 +77,7 @@ def test_execute_timeout_fires_quickly(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(
     sys.platform == "win32" and os.environ.get("CI") == "true",
-    reason="Docker Desktop on Windows CI lacks --read-only support; subprocess fallback is the real surface",
+    reason="Docker Desktop on Windows CI lacks --read-only; subprocess path is the real surface",
 )
 def test_execute_truncates_huge_output(tmp_path: Path) -> None:
     plan = plan_code_run(
