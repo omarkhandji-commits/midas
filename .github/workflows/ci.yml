@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Headless Linux runners have no keyring backend (no SecretService/KWallet).
+  # Use the null backend so tests that go through KeyringSecretVault don't crash.
+  PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
+  CI: "true"
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

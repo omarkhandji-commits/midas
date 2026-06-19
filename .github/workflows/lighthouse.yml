@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
+
 concurrency:
   group: lighthouse-${{ github.ref }}
   cancel-in-progress: true

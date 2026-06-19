@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
+
 concurrency:
   group: a11y-${{ github.ref }}
   cancel-in-progress: true
