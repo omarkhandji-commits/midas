@@ -1237,6 +1237,50 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         )
         return _json(200, {"ok": True, "provider": status_json})
 
+    @app.post("/api/providers/discover-models")
+    async def api_provider_discover_models(request: Request) -> Response:
+        _require_session(request)
+        if deps.providers is None:
+            return _json(503, {"error": "providers disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            base_url = _optional_secret(body.get("base_url")) or ""
+            api_key = _optional_secret(body.get("api_key")) or ""
+            models = deps.providers.discover_models(base_url=base_url, api_key=api_key)
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="providers.discover_models",
+            inputs={"base_url": base_url, "api_key_supplied": bool(api_key)},
+            outputs={"model_count": len(models)},
+        )
+        return _json(200, {"models": models})
+
+    @app.post("/api/providers/use-model")
+    async def api_provider_use_model(request: Request) -> Response:
+        _require_session(request)
+        if deps.providers is None:
+            return _json(503, {"error": "providers disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            model_id = str(body.get("model_id") or "").strip()
+            role = str(body.get("role") or "cheap").strip() or "cheap"
+            outcome = deps.providers.use_model(model_id, role=role)
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        _receipt(
+            deps,
+            tool="providers.use_model",
+            inputs={"model_id": outcome["model"], "role": outcome["role"]},
+            outputs={"ok": outcome["ok"]},
+        )
+        return _json(200, outcome)
+
     @app.post("/api/providers/quick-connect")
     async def api_provider_quick_connect(request: Request) -> Response:
         _require_session(request)

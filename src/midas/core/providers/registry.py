@@ -22,10 +22,6 @@ class ProviderSpec:
     base_url_env: str | None = None
     local: bool = False
     notes: str = ""
-    # Built-in base URL — when set, the operator only needs to paste a key,
-    # the URL is filled in automatically. Used for OpenAI-compatible third-party
-    # endpoints with a stable hosted address (OpenCode-Zen, future presets).
-    base_url_default: str | None = None
     # One-line consumer description shown on provider cards. Plain language;
     # no jargon — the audience is non-engineers who just want a working LLM.
     tagline: str = ""
@@ -60,11 +56,6 @@ def catalog() -> dict[str, ProviderSpec]:
         ProviderSpec(
             "openrouter", "OpenRouter", "OPENROUTER_API_KEY",
             tagline="One key, 100+ models routed for you.",
-        ),
-        ProviderSpec(
-            "opencode_zen", "OpenCode-Zen", "OPENCODE_ZEN_API_KEY",
-            base_url_default="https://opencode.ai/zen/v1",
-            tagline="Coding-tuned LLMs from sst/opencode.ai. Paste your zen key.",
         ),
         ProviderSpec(
             "deepseek", "DeepSeek", "DEEPSEEK_API_KEY",

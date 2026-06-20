@@ -139,7 +139,6 @@ class ProviderManager:
             "notes": status.notes,
             "source": self._source(name, api_key_env, base_url_env),
             "tagline": spec.tagline if spec else "",
-            "base_url_default": spec.base_url_default if spec else None,
         }
 
     def active_models(self) -> dict[str, str]:
@@ -174,10 +173,6 @@ class ProviderManager:
         elif api_key and not api_key_env:
             raise ValueError(f"{name} does not accept an API key")
 
-        # Auto-fill the URL for providers with a stable hosted endpoint (e.g.
-        # OpenCode-Zen). The operator only has to paste a key.
-        if not base_url and spec is not None and spec.base_url_default and base_url_env:
-            base_url = spec.base_url_default
         if base_url and base_url_env:
             self.vault.set(base_url_env, base_url.strip())
         elif base_url and not base_url_env:
@@ -185,19 +180,91 @@ class ProviderManager:
 
         self.apply_to_environment()
 
-        # OpenAI-compatible providers route through LiteLLM with model id
-        # "openai/<m>", which reads OPENAI_API_BASE + OPENAI_API_KEY. Mirror
-        # the just-saved key/URL onto those env names so the next chat call
-        # actually reaches the configured endpoint.
-        if api_key and spec is not None and spec.base_url_default:
-            self.env["OPENAI_API_BASE"] = spec.base_url_default
-            self.env["OPENAI_API_KEY"] = api_key.strip()
-            self.vault.set("OPENAI_API_BASE", spec.base_url_default)
-            self.vault.set("OPENAI_API_KEY", api_key.strip())
-
         if api_key:
             self._wire_cheap_role(name)
         return self.status(name)
+
+    def discover_models(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float = 8.0,
+    ) -> list[str]:
+        """Call ``<base_url>/models`` and return the list of model ids.
+
+        Every OpenAI-compatible endpoint exposes a ``GET /models`` route; LM Studio,
+        vLLM, Together, Groq, OpenCode-Zen, and OpenAI itself all conform. Used by
+        the dashboard so the operator never has to guess a model id by hand —
+        paste URL + key, click Discover, pick from the list.
+
+        On HTTP error or non-OpenAI-shape payload we raise ``ValueError`` with a
+        short, actionable message — the UI surfaces it as the next-step hint.
+        """
+        url = base_url.strip().rstrip("/")
+        key = api_key.strip()
+        if not url:
+            raise ValueError("base_url required")
+        if not (url.startswith("https://") or url.startswith("http://")):
+            raise ValueError("base_url must start with http:// or https://")
+
+        import httpx
+
+        headers = {"Accept": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        try:
+            response = httpx.get(f"{url}/models", headers=headers, timeout=timeout_seconds)
+        except httpx.RequestError as exc:
+            raise ValueError(f"endpoint unreachable: {exc.__class__.__name__}") from exc
+        if response.status_code == 401:
+            raise ValueError("key rejected (HTTP 401) — check the key")
+        if response.status_code == 403:
+            raise ValueError("key forbidden (HTTP 403) — check scopes/billing")
+        if response.status_code == 404:
+            raise ValueError("endpoint has no /models route — try without /v1 or check the URL")
+        if response.status_code >= 400:
+            raise ValueError(f"server replied {response.status_code}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ValueError("response is not JSON — wrong URL?") from exc
+
+        candidates: list[Any] = []
+        if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+            candidates = payload["data"]
+        elif isinstance(payload, list):
+            candidates = payload
+
+        ids: list[str] = []
+        for item in candidates:
+            if isinstance(item, dict):
+                ident = item.get("id") or item.get("name")
+                if isinstance(ident, str) and ident:
+                    ids.append(ident)
+            elif isinstance(item, str):
+                ids.append(item)
+        return sorted(set(ids))
+
+    def use_model(self, model_id: str, *, role: str = "cheap") -> dict[str, Any]:
+        """Set ``roles[role].primary`` to the exact model id provided.
+
+        The UI's "Use this" button on each connected LLM card calls this. Also
+        persists ``MIDAS_MODEL_CHEAP`` to ``.env`` so the next dashboard launch
+        starts on the same model — no "switched LLM but it forgot" surprises.
+        """
+        mid = model_id.strip()
+        if not mid:
+            raise ValueError("model_id required")
+        current = self.config.roles.get(role)
+        self.config.roles[role] = RoleConfig(
+            primary=mid,
+            fallbacks=current.fallbacks if current else [],
+        )
+        self.env["MIDAS_MODEL_CHEAP"] = mid
+        if self.env_path is not None:
+            upsert_env(self.env_path, {"MIDAS_MODEL_CHEAP": mid})
+        return {"ok": True, "role": role, "model": mid}
 
     def quick_connect(
         self,
