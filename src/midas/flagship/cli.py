@@ -347,9 +347,16 @@ def _launch_console(
     not show it in the terminal by default — the user just sees their dashboard
     open. ``show_link=True`` is the rescue path for the rare "no browser opened"
     case (``midas dashboard --show-link``).
+
+    If Telegram credentials are present in the keychain, also starts the
+    long-poll listener alongside the web server so the bot actually answers —
+    saving a key in ``/connections`` should not silently no-op.
     """
+    import asyncio
+
     import uvicorn
 
+    from midas.flagship.channel_settings import TelegramLongPollListener
     from midas.flagship.dashboard import create_app
 
     deps = rt.dashboard_deps(allowed_host=f"{host}:{port}")
@@ -359,6 +366,13 @@ def _launch_console(
     typer.echo(f"\nMidas console opening at {url}")
     if show_link:
         typer.echo(f"Direct link: {magic}")
+
+    telegram_config = rt.channels.telegram_config()
+    if telegram_config is None:
+        typer.echo("Telegram listener: not configured (no token + chat id in keychain)")
+    else:
+        typer.echo("Telegram listener: starting alongside the dashboard")
+
     if open_browser:
         with suppress(Exception):
             import threading
@@ -366,7 +380,24 @@ def _launch_console(
 
             threading.Timer(0.6, lambda: webbrowser.open(magic)).start()
     typer.echo("Press Ctrl+C to stop.")
-    uvicorn.run(create_app(deps, bind_host=host), host=host, port=port, log_level="warning")
+
+    async def _serve() -> None:
+        tasks: list[Any] = []
+        if telegram_config is not None:
+            listener = TelegramLongPollListener(config=telegram_config, queue=rt.approvals)
+            tasks.append(asyncio.create_task(listener.run_forever()))
+        server = uvicorn.Server(
+            uvicorn.Config(
+                create_app(deps, bind_host=host),
+                host=host,
+                port=port,
+                log_level="warning",
+            )
+        )
+        tasks.append(asyncio.create_task(server.serve()))
+        await asyncio.gather(*tasks)
+
+    asyncio.run(_serve())
 
 
 @app.command()
