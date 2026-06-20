@@ -91,6 +91,9 @@ def build_demo_deps() -> DashboardDeps:
     print(f"\n[MIDAS dashboard] http://{_HOST}:{_PORT}/login")
     print(f"[MIDAS dashboard] one-time token: {token.value}\n", flush=True)
 
+    from midas.flagship.chat_sessions import ChatSessionStore
+
+    chat_sessions = ChatSessionStore(base / "sessions")
     return DashboardDeps(
         queue=queue,
         ledger=ledger,
@@ -103,6 +106,7 @@ def build_demo_deps() -> DashboardDeps:
         sessions=Sessions(SessionConfig(owner_id="owner", secret_key=generate_secret_key())),
         login_token=token,
         allowed_hosts={f"{_HOST}:{_PORT}", "localhost:" + str(_PORT)},
+        chat_sessions=chat_sessions,
         sse_interval_seconds=1.0,
     )
 

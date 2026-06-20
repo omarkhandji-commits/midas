@@ -36,6 +36,7 @@ from midas.core.web import (
 from midas.flagship.agent import AgentLoop, FsGuard, build_default_toolset
 from midas.flagship.agent.loop import llm_planner
 from midas.flagship.channel_settings import ChannelManager
+from midas.flagship.chat_sessions import ChatSessionStore
 from midas.flagship.market import CompetitorStore
 from midas.flagship.provider_settings import (
     DashboardSettings,
@@ -80,6 +81,7 @@ class Runtime:
     channels: ChannelManager
     schedule_store: ScheduleStore
     scheduled_posts: ScheduledPostStore
+    chat_sessions: ChatSessionStore
     skill_registry: SkillRegistry
     fs_guard: FsGuard
 
@@ -168,6 +170,7 @@ class Runtime:
             fetcher=self.fetcher,
             schedule_store=self.schedule_store,
             scheduled_posts=self.scheduled_posts,
+            chat_sessions=self.chat_sessions,
             skill_registry=self.skill_registry,
             fs_guard=self.fs_guard,
         )
@@ -209,6 +212,7 @@ def build_runtime(base_dir: str | Path) -> Runtime:
     )
     schedule_store = ScheduleStore(state / "schedules.json")
     scheduled_posts = ScheduledPostStore(state / "scheduled_posts.json")
+    chat_sessions = ChatSessionStore(state / "sessions")
     skill_registry = SkillRegistry(state)
 
     # Workspace = the project dir. fsguard enforces policy.filesystem (workspace-only,
@@ -236,6 +240,7 @@ def build_runtime(base_dir: str | Path) -> Runtime:
         channels=channels,
         schedule_store=schedule_store,
         scheduled_posts=scheduled_posts,
+        chat_sessions=chat_sessions,
         skill_registry=skill_registry,
         fs_guard=fs_guard,
     )

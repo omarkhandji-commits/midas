@@ -437,6 +437,84 @@ class ProviderManager:
                 if value:
                     self.env[handle] = value
 
+        # OpenAI-compatible aliasing. LiteLLM routes any "openai/<m>" model id
+        # through OPENAI_API_KEY + OPENAI_API_BASE — the standard OpenAI env
+        # names. Historically MIDAS stored custom-gateway credentials under
+        # OPENAI_COMPATIBLE_* or per-provider handles (e.g. OPENCODE_ZEN_API_KEY)
+        # which were never read by LiteLLM, producing the silent "connected but
+        # the chat fails" bug. Bridge them: if OPENAI_API_* is missing but a
+        # compatible alternative is present in vault/env, copy it across.
+        if not self.env.get("OPENAI_API_KEY"):
+            for alt in self._openai_compat_key_handles():
+                value = self.vault.get(alt) or self.env.get(alt)
+                if value:
+                    self.env["OPENAI_API_KEY"] = value
+                    break
+        if not self.env.get("OPENAI_API_BASE"):
+            for alt in ("OPENAI_COMPATIBLE_BASE_URL", "OPENAI_BASE_URL"):
+                value = self.vault.get(alt) or self.env.get(alt)
+                if value:
+                    self.env["OPENAI_API_BASE"] = value
+                    break
+
+    def _openai_compat_key_handles(self) -> list[str]:
+        """Return env-var names that historically held OpenAI-compatible keys.
+
+        Catalog providers whose label includes "compat" or whose configured base URL
+        is set via env (not native to openai) qualify. Plus a handful of well-known
+        third-party gateways added over time.
+        """
+        names = ["OPENAI_COMPATIBLE_API_KEY"]
+        for spec in catalog().values():
+            if (
+                spec.name not in {"openai", "anthropic", "azure", "vertex", "bedrock"}
+                and spec.api_key_env
+                and spec.api_key_env not in names
+                and "_API_KEY" in spec.api_key_env
+                and spec.name not in {"groq", "mistral", "google", "openrouter"}
+            ):
+                names.append(spec.api_key_env)
+        return names
+
+    def diagnose(self) -> list[dict[str, Any]]:
+        """Per-handle vault/env report for the Provider Doctor UI.
+
+        Returns one row per env handle showing whether the value is present in the
+        keychain vault, in os.environ, both, or neither. Lets the operator see at a
+        glance why their chat keeps failing despite a "connected" badge — e.g. key
+        is in vault but didn't propagate to env, or env has a value but vault is
+        empty (so a restart will lose it).
+        """
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for name in self._provider_names():
+            spec = self._spec(name)
+            for handle in self._handles(name, spec):
+                if not handle or handle in seen:
+                    continue
+                seen.add(handle)
+                rows.append(
+                    {
+                        "handle": handle,
+                        "provider": name,
+                        "in_vault": bool(self.vault.get(handle)),
+                        "in_env": bool(self.env.get(handle)),
+                    }
+                )
+        # Always report the LiteLLM canonical handles too even if not in a spec.
+        for handle in ("OPENAI_API_KEY", "OPENAI_API_BASE"):
+            if handle in seen:
+                continue
+            rows.append(
+                {
+                    "handle": handle,
+                    "provider": "litellm-canonical",
+                    "in_vault": bool(self.vault.get(handle)),
+                    "in_env": bool(self.env.get(handle)),
+                }
+            )
+        return rows
+
     def _provider_names(self) -> list[str]:
         return sorted(set(catalog()) | set(self.config.providers))
 

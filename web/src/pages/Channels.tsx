@@ -249,9 +249,68 @@ export function ChannelsPage() {
                 value={channel.missing.length ? channel.missing.join(", ") : "none"}
               />
             </div>
+            <WebhookNote channel={channel.name} />
           </Card>
         ))}
       </section>
+    </div>
+  );
+}
+
+const WEBHOOK_CHANNELS = new Set(["discord", "slack", "whatsapp", "sms"]);
+const EMAIL_PULL = new Set(["email"]);
+
+function WebhookNote({ channel }: { channel: string }) {
+  if (EMAIL_PULL.has(channel)) {
+    return (
+      <p className="mt-3 border border-rule bg-rule-soft/30 p-3 text-xs text-mute">
+        <strong className="text-ink">Pull-based.</strong>{" "}
+        MIDAS reads your inbox only when an agent step calls{" "}
+        <code>email.inbox.read</code>. No background listener.
+      </p>
+    );
+  }
+  if (!WEBHOOK_CHANNELS.has(channel)) return null;
+  const url = `${typeof window !== "undefined" ? window.location.origin : "https://your-tunnel.example"}/api/webhooks/${channel}`;
+  return (
+    <div className="mt-3 border border-warn/40 bg-warn-bg/30 p-3 text-xs">
+      <p>
+        <strong className="text-warn">Needs a public tunnel.</strong>{" "}
+        Providers cannot reach <code>127.0.0.1</code>. Start{" "}
+        <a
+          className="text-accent underline"
+          href="https://ngrok.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          ngrok
+        </a>{" "}
+        (<code>ngrok http 8765</code>) and paste this URL into the provider:
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <code className="flex-1 overflow-x-auto border border-rule bg-paper px-2 py-1 font-mono text-[11px]">
+          {url}
+        </code>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => void navigator.clipboard.writeText(url)}
+        >
+          Copy
+        </Button>
+      </div>
+      <p className="mt-2">
+        Full setup steps:{" "}
+        <a
+          className="text-accent underline"
+          href="https://github.com/omarkhandji-commits/midas/blob/main/docs/CHANNELS.md"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          docs/CHANNELS.md
+        </a>
+      </p>
     </div>
   );
 }

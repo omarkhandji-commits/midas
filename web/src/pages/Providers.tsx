@@ -116,7 +116,7 @@ export function ProvidersPage() {
     });
   }
 
-  async function useExistingProvider(p: ProviderStatus) {
+  async function activateProvider(p: ProviderStatus) {
     await run(async () => {
       await api.post("/api/providers", { provider: p.name });
       setNotice(`${p.label} set as active. Chat will use it on the next message.`);
@@ -124,7 +124,7 @@ export function ProvidersPage() {
     });
   }
 
-  async function useModelId(modelId: string) {
+  async function applyModelId(modelId: string) {
     await run(async () => {
       await api.post("/api/providers/use-model", { model_id: modelId });
       setNotice(`Active model is now ${modelId}.`);
@@ -224,7 +224,7 @@ export function ProvidersPage() {
                 type="button"
                 variant="primary"
                 disabled={busy || !editValue.trim()}
-                onClick={() => useModelId(editValue.trim())}
+                onClick={() => applyModelId(editValue.trim())}
               >
                 Save
               </Button>
@@ -383,7 +383,7 @@ export function ProvidersPage() {
                 p={p}
                 isActive={activeModel.startsWith(`${p.name}/`)}
                 busy={busy}
-                onUse={() => useExistingProvider(p)}
+                onUse={() => activateProvider(p)}
                 onRemove={() => removeProvider(p.name, p.label)}
               />
             ))}
@@ -396,7 +396,7 @@ export function ProvidersPage() {
                   (p.name === "openai_compatible" && activeModel.startsWith("openai/"))
                 }
                 busy={busy}
-                onUse={() => useExistingProvider(p)}
+                onUse={() => activateProvider(p)}
                 onRemove={() => removeProvider(p.name, p.label)}
               />
             ))}

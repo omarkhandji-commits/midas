@@ -1,18 +1,31 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   CheckCircle2,
   Inbox,
   PlayCircle,
+  Plus,
   Send,
   ShieldCheck,
   Sparkles,
   Terminal,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardKicker, CardTitle } from "@/components/ui/card";
 import { api, type SseFrame } from "@/lib/api";
 import { cn, formatCurrency } from "@/lib/utils";
+
+type SessionSummary = {
+  id: string;
+  title: string;
+  created_ts: number;
+  last_msg_ts: number;
+  message_count: number;
+  cost_total: number;
+};
 
 type Mode = "chat" | "do";
 
@@ -36,14 +49,27 @@ type StepFrame = {
   output_summary: string;
   error: string | null;
 };
-type DoneChatFrame = { proof_level: string; sources: string[]; cost_usd: number };
+type DoneChatFrame = {
+  proof_level: string;
+  sources: string[];
+  cost_usd: number;
+  run_id?: string;
+};
 type DoneDoFrame = {
   run_id: string;
   stopped_reason: string;
   step_count: number;
   queued_approvals: number[];
 };
-type ErrorFrame = { code: string; scope?: string; projected?: number; cap?: number };
+type ErrorFrame = {
+  code: string;
+  scope?: string;
+  projected?: number;
+  cap?: number;
+  detail?: string;
+  model?: string;
+  hint?: string;
+};
 type ExecutedResult = {
   path?: string;
   kind?: string;
@@ -63,6 +89,60 @@ export function ChatPage() {
   const [doDone, setDoDone] = useState<DoneDoFrame | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessionId, setSessionId] = useState<string>("");
+
+  useEffect(() => {
+    void loadSessions();
+  }, []);
+
+  async function loadSessions() {
+    try {
+      const data = await api.get<{ sessions: SessionSummary[] }>("/api/chat/sessions");
+      setSessions(data.sessions);
+    } catch {
+      // Empty store is fine; do not fail the chat over sidebar load.
+    }
+  }
+
+  async function openSession(id: string) {
+    try {
+      const data = await api.get<{
+        summary: SessionSummary;
+        messages: { ts: number; role: "user" | "assistant"; content: string }[];
+      }>(`/api/chat/sessions/${encodeURIComponent(id)}`);
+      setSessionId(id);
+      setMessages(
+        data.messages.map((m) => ({ role: m.role, content: m.content })),
+      );
+      setApprovals([]);
+      setSteps([]);
+      setDone(null);
+      setDoDone(null);
+    } catch (err) {
+      setError(readError(err));
+    }
+  }
+
+  function newSession() {
+    setSessionId("");
+    setMessages([]);
+    setApprovals([]);
+    setSteps([]);
+    setDone(null);
+    setDoDone(null);
+    setError(null);
+  }
+
+  async function deleteSession(id: string) {
+    try {
+      await api.delete(`/api/chat/sessions/${encodeURIComponent(id)}`);
+      if (id === sessionId) newSession();
+      await loadSessions();
+    } catch (err) {
+      setError(readError(err));
+    }
+  }
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -92,6 +172,7 @@ export function ChatPage() {
         {
           message,
           mode,
+          session_id: sessionId || undefined,
           history:
             mode === "chat"
               ? messages.map((item) => ({ role: item.role, content: item.content }))
@@ -99,6 +180,8 @@ export function ChatPage() {
         },
         handleFrame,
       );
+      // Refresh sidebar so the new/updated session appears at top.
+      void loadSessions();
     } catch (err) {
       setError(readError(err));
     } finally {
@@ -122,7 +205,14 @@ export function ChatPage() {
       }
     }
     if (frame.event === "done") {
-      if (isDone(frame.data)) setDone(frame.data);
+      if (isDone(frame.data)) {
+        setDone(frame.data);
+        // Backend uses session_id as the run_id; pick it up so follow-ups
+        // share the same session in storage.
+        if (!sessionId && isRecord(frame.data) && typeof frame.data.run_id === "string") {
+          setSessionId(String(frame.data.run_id));
+        }
+      }
       if (isDoneDo(frame.data)) setDoDone(frame.data);
     }
     if (frame.event === "error" && isRecord(frame.data)) {
@@ -157,7 +247,15 @@ export function ChatPage() {
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-150px)] gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+    <div className="grid min-h-[calc(100vh-150px)] gap-4 lg:grid-cols-[220px_minmax(0,1fr)_340px]">
+      <SessionsSidebar
+        sessions={sessions}
+        activeId={sessionId}
+        busy={busy}
+        onOpen={openSession}
+        onNew={newSession}
+        onDelete={deleteSession}
+      />
       <section className="flex min-h-[620px] flex-col border border-rule bg-paper">
         <div className="border-b border-rule px-5 py-4">
           <div className="flex items-center justify-between gap-3">
@@ -388,6 +486,69 @@ function StepRow({ step, executed }: { step: StepFrame; executed?: ExecutedResul
   );
 }
 
+function SessionsSidebar({
+  sessions,
+  activeId,
+  busy,
+  onOpen,
+  onNew,
+  onDelete,
+}: {
+  sessions: SessionSummary[];
+  activeId: string;
+  busy: boolean;
+  onOpen: (id: string) => void;
+  onNew: () => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <aside className="flex min-h-[620px] flex-col border border-rule bg-paper">
+      <div className="border-b border-rule px-3 py-3">
+        <Button type="button" size="sm" variant="primary" onClick={onNew} disabled={busy} className="w-full">
+          <Plus className="size-3.5" aria-hidden />
+          New chat
+        </Button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-2">
+        {sessions.length === 0 ? (
+          <p className="p-3 text-xs text-mute">No past chats yet. Send a message to start.</p>
+        ) : (
+          <ul className="space-y-1">
+            {sessions.map((s) => (
+              <li key={s.id} className="group">
+                <button
+                  type="button"
+                  className={cn(
+                    "flex w-full flex-col items-start gap-0.5 border border-transparent px-2 py-1.5 text-left text-xs hover:border-rule hover:bg-rule-soft/40",
+                    activeId === s.id && "border-accent bg-rule-soft/40",
+                  )}
+                  onClick={() => onOpen(s.id)}
+                >
+                  <span className="line-clamp-2 font-medium text-ink">{s.title}</span>
+                  <span className="font-mono text-[10px] text-mute">
+                    {s.message_count} msg · {formatCurrency(s.cost_total)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="hidden text-mute hover:text-warn group-hover:inline-block"
+                  title="Delete chat"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm("Delete this chat?")) onDelete(s.id);
+                  }}
+                >
+                  <Trash2 className="size-3" aria-hidden />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </aside>
+  );
+}
+
 function ChatBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   return (
@@ -395,7 +556,58 @@ function ChatBubble({ message }: { message: ChatMessage }) {
       <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.08em] text-mute">
         {isUser ? "You" : "MIDAS"}
       </p>
-      <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+      {isUser ? (
+        <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+      ) : (
+        <div className="prose-midas text-sm leading-6">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              code: ({ className, children, ...props }) => {
+                const isInline = !className?.startsWith("language-");
+                if (isInline) {
+                  return (
+                    <code className="border border-rule bg-rule-soft/60 px-1 py-0.5 font-mono text-[12px]">
+                      {children}
+                    </code>
+                  );
+                }
+                return (
+                  <pre className="overflow-x-auto border border-rule bg-rule-soft/40 p-3 font-mono text-[12px]">
+                    <code {...props}>{children}</code>
+                  </pre>
+                );
+              },
+              table: ({ children }) => (
+                <table className="my-2 border-collapse border border-rule text-xs">
+                  {children}
+                </table>
+              ),
+              th: ({ children }) => (
+                <th className="border border-rule bg-rule-soft/60 px-2 py-1 text-left font-mono text-[11px] uppercase tracking-[0.08em]">
+                  {children}
+                </th>
+              ),
+              td: ({ children }) => (
+                <td className="border border-rule px-2 py-1">{children}</td>
+              ),
+              h1: ({ children }) => <h2 className="mt-2 mb-1 font-display text-base font-medium">{children}</h2>,
+              h2: ({ children }) => <h3 className="mt-2 mb-1 font-display text-sm font-medium">{children}</h3>,
+              h3: ({ children }) => <h4 className="mt-1 mb-1 font-display text-sm font-medium">{children}</h4>,
+              ul: ({ children }) => <ul className="ml-4 list-disc">{children}</ul>,
+              ol: ({ children }) => <ol className="ml-4 list-decimal">{children}</ol>,
+              p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+              a: ({ href, children }) => (
+                <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline">
+                  {children}
+                </a>
+              ),
+            }}
+          >
+            {message.content}
+          </ReactMarkdown>
+        </div>
+      )}
     </article>
   );
 }
@@ -557,6 +769,16 @@ function isDoneDo(value: unknown): value is DoneDoFrame {
 function errorCopy(error: ErrorFrame): string {
   if (error.code === "budget_exceeded") {
     return `Budget ${error.scope ?? ""} exceeded: ${formatCurrency(error.projected ?? 0)} > ${formatCurrency(error.cap ?? 0)}`;
+  }
+  if (error.code === "chat_failed") {
+    // Backend now emits an actionable hint + model id; prefer those over the raw exception.
+    if (error.hint) {
+      return error.model ? `${error.hint} (active model: ${error.model})` : error.hint;
+    }
+    if (error.detail) {
+      return `Chat failed: ${error.detail}`;
+    }
+    return "Chat failed — open /providers and run Doctor.";
   }
   if (error.code === "executor_unavailable") {
     return "Do mode requires the executor — configure providers and reload.";

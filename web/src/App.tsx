@@ -1,5 +1,6 @@
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, redirect } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { api } from "@/lib/api";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { CapabilitiesPage } from "@/pages/Capabilities";
 import { BlogsPage } from "@/pages/Blogs";
@@ -27,35 +28,52 @@ import { SettingsPage } from "@/pages/Settings";
 
 // FastAPI serves the SPA from / after a successful login (the legacy Jinja /login
 // page still owns the token form). React Router handles every in-app route.
+
+// First-run gate. If the operator has no LLM provider configured, every route
+// (except the onboarding wizard, settings, and how-it-works explainer) redirects
+// to /start. The redirect happens on the loader, so the dashboard never flashes
+// an empty Chat for new users — they land exactly where they need to be.
+async function requireProvider() {
+  try {
+    const state = await api.get<{ has_provider: boolean }>("/api/onboard/state");
+    if (!state.has_provider) {
+      return redirect("/start");
+    }
+  } catch {
+    // If the endpoint is unreachable (e.g. dashboard restarting) let the page render.
+  }
+  return null;
+}
+
 const router = createBrowserRouter([
   {
     path: "/",
     element: <AppShell />,
     children: [
       { path: "start", element: <OnboardingPage /> },
-      { path: "capabilities", element: <CapabilitiesPage /> },
+      { path: "settings", element: <SettingsPage /> },
       { path: "how-it-works", element: <HowItWorksPage /> },
-      { index: true, element: <ChatPage /> },
-      { path: "missions", element: <MissionsPage /> },
-      { path: "assets", element: <AssetsPage /> },
-      { path: "blogs", element: <BlogsPage /> },
-      { path: "courses", element: <CoursesPage /> },
-      { path: "newsletters", element: <NewslettersPage /> },
-      { path: "artifacts", element: <ArtifactsPage /> },
-      { path: "approvals", element: <ApprovalsPage /> },
-      { path: "proofs", element: <ProofsPage /> },
-      { path: "leads", element: <LeadsPage /> },
-      { path: "memory", element: <MemoryPage /> },
-      { path: "outcomes", element: <OutcomesPage /> },
-      { path: "cohorts", element: <CohortsPage /> },
+      { path: "providers", element: <ProvidersPage /> },
+      { path: "capabilities", element: <CapabilitiesPage /> },
+      { index: true, element: <ChatPage />, loader: requireProvider },
+      { path: "missions", element: <MissionsPage />, loader: requireProvider },
+      { path: "assets", element: <AssetsPage />, loader: requireProvider },
+      { path: "blogs", element: <BlogsPage />, loader: requireProvider },
+      { path: "courses", element: <CoursesPage />, loader: requireProvider },
+      { path: "newsletters", element: <NewslettersPage />, loader: requireProvider },
+      { path: "artifacts", element: <ArtifactsPage />, loader: requireProvider },
+      { path: "approvals", element: <ApprovalsPage />, loader: requireProvider },
+      { path: "proofs", element: <ProofsPage />, loader: requireProvider },
+      { path: "leads", element: <LeadsPage />, loader: requireProvider },
+      { path: "memory", element: <MemoryPage />, loader: requireProvider },
+      { path: "outcomes", element: <OutcomesPage />, loader: requireProvider },
+      { path: "cohorts", element: <CohortsPage />, loader: requireProvider },
       { path: "connections", element: <ConnectionsPage /> },
       { path: "channels", element: <ChannelsPage /> },
-      { path: "providers", element: <ProvidersPage /> },
-      { path: "market", element: <MarketPage /> },
-      { path: "schedule", element: <SchedulePage /> },
-      { path: "calendar", element: <CalendarPage /> },
+      { path: "market", element: <MarketPage />, loader: requireProvider },
+      { path: "schedule", element: <SchedulePage />, loader: requireProvider },
+      { path: "calendar", element: <CalendarPage />, loader: requireProvider },
       { path: "skills", element: <SkillsPage /> },
-      { path: "settings", element: <SettingsPage /> },
     ],
   },
 ]);

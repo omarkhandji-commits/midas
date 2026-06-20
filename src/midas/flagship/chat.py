@@ -19,6 +19,9 @@ from midas.core.sentinel import Sentinel, ToolCall
 
 _APPROVAL_PREFIX = "APPROVAL_REQUIRED:"
 _APPROVAL_RE = re.compile(r"APPROVAL_REQUIRED:\s*(\{.*\})", re.DOTALL)
+# New shape: ```action\n{...}\n```. Easier on the LLM (it's already producing
+# markdown) and cleaner to extract — see _extract_action_block.
+_ACTION_BLOCK_RE = re.compile(r"```action\s*\n(.*?)\n```", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -81,7 +84,12 @@ def run_chat(
         est_usd=est_usd,
         agent="dashboard-chat",
     )
-    text, requested = _extract_approval(result.text)
+    # New markdown-friendly extraction first, then the legacy APPROVAL_REQUIRED
+    # marker, then a heuristic fallback. Order matters: the new shape is what we
+    # tell the model to emit in the rewritten system prompt below.
+    text, requested = _extract_action_block(result.text)
+    if requested is None:
+        text, requested = _extract_approval(text)
     requested = requested or _infer_risky_action(message, text)
     approval = _queue_approval(
         requested,
@@ -109,19 +117,54 @@ def _messages(message: str, history: list[dict[str, str]]) -> list[dict[str, str
     return [
         {
             "role": "system",
-            "content": (
-                "You are MIDAS, a proof-first business operator. Draft useful work, "
-                "state uncertainty, do not guarantee revenue, and never claim an "
-                "external action has been executed. If you propose a risky or outbound "
-                "action, add one final line exactly like: "
-                f"{_APPROVAL_PREFIX} "
-                '{"tool":"email","action":"send_email","summary":"Send prepared email",'
-                '"payload":{"draft":"..."}}'
-            ),
+            "content": _SYSTEM_PROMPT,
         },
         *clean_history,
         {"role": "user", "content": message},
     ]
+
+
+_SYSTEM_PROMPT = (
+    "You are MIDAS, a proof-first business operator running locally on the user's "
+    "machine. You talk like a normal helpful assistant — clear, friendly, brief. "
+    "Format your replies as Markdown: headings, bullet lists, fenced code blocks, "
+    "and GitHub-flavored tables when they help. Be honest about uncertainty, never "
+    "guarantee revenue, never claim an external action has been executed.\n\n"
+    "When you want to PROPOSE a risky or outbound action (sending email, posting "
+    "publicly, calling someone, writing files, spending money), do NOT execute it. "
+    "Append ONE fenced block at the end of your reply:\n\n"
+    "```action\n"
+    "{\n"
+    '  "tool": "email",\n'
+    '  "action": "send_email",\n'
+    '  "summary": "Short one-line description",\n'
+    '  "payload": {"draft": "<the actual draft>"}\n'
+    "}\n"
+    "```\n\n"
+    "MIDAS will surface that block as an approval card. The user reviews and "
+    "decides — only then does the action run. If no risky action is needed, "
+    "do not emit any action block."
+)
+
+
+def _extract_action_block(text: str) -> tuple[str, dict[str, Any] | None]:
+    """Parse the new ```action {...} ``` fenced block format.
+
+    The block is stripped from the visible text so the operator sees clean
+    markdown without the JSON. Returns ``(visible_text, action_dict_or_None)``.
+    Falls back gracefully on malformed JSON inside the fence.
+    """
+    match = _ACTION_BLOCK_RE.search(text)
+    if match is None:
+        return text, None
+    visible = (text[: match.start()] + text[match.end():]).strip()
+    try:
+        payload = json.loads(match.group(1).strip())
+    except json.JSONDecodeError:
+        return visible, None
+    if not isinstance(payload, dict):
+        return visible, None
+    return visible, _normalise_requested_action(payload)
 
 
 def _extract_approval(text: str) -> tuple[str, dict[str, Any] | None]:

@@ -87,6 +87,7 @@ class DashboardDeps:
     fetcher: Any = None  # Fetcher used by Market Radar snapshot endpoints (optional)
     schedule_store: Any = None  # ScheduleStore for recipe CRUD (optional)
     scheduled_posts: Any = None  # ScheduledPostStore for queued posts (optional)
+    chat_sessions: Any = None  # ChatSessionStore for sidebar history (optional)
     skill_registry: Any = None  # SkillRegistry for skills CRUD (optional)
     fs_guard: Any = None  # FsGuard for the Do-mode executor (optional)
     chat_est_usd: float = 0.02
@@ -109,8 +110,13 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
 
     @app.middleware("http")
     async def _security(request: Request, call_next):
-        # CSRF + Origin gate BEFORE the handler runs.
-        if is_state_changing(request.method) and request.url.path != "/login":
+        # CSRF + Origin gate BEFORE the handler runs. Webhook routes are exempted
+        # because providers (Slack, Twilio, Discord, Meta) cannot send our cookies;
+        # they authenticate via per-provider signature verification done in
+        # webhooks.py before the handler parses the payload.
+        path = request.url.path
+        is_webhook = path.startswith("/api/webhooks/")
+        if is_state_changing(request.method) and path != "/login" and not is_webhook:
             if not origin_ok(origin=request.headers.get("origin"),
                              allowed_hosts=deps.allowed_hosts):
                 return _json(403, {"error": "bad origin"})
@@ -1237,6 +1243,20 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         )
         return _json(200, {"ok": True, "provider": status_json})
 
+    @app.get("/api/providers/diagnose")
+    def api_provider_diagnose(request: Request) -> Response:
+        _require_session(request)
+        if deps.providers is None:
+            return _json(503, {"error": "providers disabled"})
+        deps.providers.apply_to_environment()
+        return _json(
+            200,
+            {
+                "rows": deps.providers.diagnose(),
+                "active_models": deps.providers.active_models(),
+            },
+        )
+
     @app.post("/api/providers/discover-models")
     async def api_provider_discover_models(request: Request) -> Response:
         _require_session(request)
@@ -1386,6 +1406,70 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         )
         return _json(200, {"ok": True, "settings": settings_json})
 
+    @app.get("/api/chat/sessions")
+    def api_chat_sessions(request: Request) -> Response:
+        _require_session(request)
+        if deps.chat_sessions is None:
+            return _json(200, {"sessions": []})
+        try:
+            limit = int(request.query_params.get("limit", "50"))
+        except ValueError:
+            limit = 50
+        return _json(
+            200,
+            {"sessions": [s.to_json() for s in deps.chat_sessions.list_recent(limit=limit)]},
+        )
+
+    @app.get("/api/chat/sessions/{session_id}")
+    def api_chat_session_get(request: Request, session_id: str) -> Response:
+        _require_session(request)
+        if deps.chat_sessions is None:
+            return _json(404, {"error": "sessions disabled"})
+        try:
+            summary = deps.chat_sessions.get_summary(session_id)
+            messages = deps.chat_sessions.messages(session_id)
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        if summary is None:
+            return _json(404, {"error": "session not found"})
+        return _json(
+            200,
+            {
+                "summary": summary.to_json(),
+                "messages": [m.to_json() for m in messages],
+            },
+        )
+
+    @app.patch("/api/chat/sessions/{session_id}")
+    async def api_chat_session_rename(request: Request, session_id: str) -> Response:
+        _require_session(request)
+        if deps.chat_sessions is None:
+            return _json(404, {"error": "sessions disabled"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return _json(400, {"error": "json object required"})
+            title = str(body.get("title") or "")
+            summary = deps.chat_sessions.rename(session_id, title)
+        except (TypeError, ValueError) as exc:
+            return _json(400, {"error": str(exc)})
+        if summary is None:
+            return _json(404, {"error": "session not found"})
+        return _json(200, {"summary": summary.to_json()})
+
+    @app.delete("/api/chat/sessions/{session_id}")
+    def api_chat_session_delete(request: Request, session_id: str) -> Response:
+        _require_session(request)
+        if deps.chat_sessions is None:
+            return _json(404, {"error": "sessions disabled"})
+        try:
+            removed = deps.chat_sessions.delete(session_id)
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        if not removed:
+            return _json(404, {"error": "session not found"})
+        return _json(200, {"ok": True})
+
     @app.post("/api/chat")
     async def api_chat(request: Request) -> Any:
         _require_session(request)
@@ -1396,6 +1480,7 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
             message = str(body.get("message") or "").strip()
             history = body.get("history") if isinstance(body.get("history"), list) else []
             mode = str(body.get("mode") or "chat").strip().lower()
+            session_id = str(body.get("session_id") or "").strip()
             if mode not in {"chat", "do"}:
                 return _json(400, {"error": "mode must be 'chat' or 'do'"})
             if not message:
@@ -1405,7 +1490,10 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
 
         from starlette.responses import StreamingResponse
 
-        run_id = f"{mode}:{uuid.uuid4().hex[:12]}"
+        # Reuse the session_id from the client when present so multi-turn
+        # conversations share a single ChatSessionStore row; otherwise mint a new
+        # run_id and the first append() will create the row.
+        run_id = session_id or f"{mode}:{uuid.uuid4().hex[:12]}"
 
         if mode == "do":
             if deps.sentinel is None or deps.fs_guard is None:
@@ -1443,9 +1531,44 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
                     },
                 )
                 return
-            except Exception:
-                yield _sse("error", {"code": "chat_failed"})
+            except Exception as exc:
+                active_model = ""
+                if deps.providers is not None:
+                    active_model = deps.providers.active_models().get("cheap", "")
+                hint = _explain_chat_failure(exc, active_model)
+                yield _sse(
+                    "error",
+                    {
+                        "code": "chat_failed",
+                        "detail": str(exc)[:240],
+                        "model": active_model,
+                        "hint": hint,
+                    },
+                )
                 return
+
+            # Persist the round-trip so the sidebar shows it on reload. Best-effort —
+            # storage failure must not block the SSE stream.
+            if deps.chat_sessions is not None:
+                active_model = ""
+                if deps.providers is not None:
+                    try:
+                        active_model = deps.providers.active_models().get("cheap", "")
+                    except Exception:
+                        active_model = ""
+                try:
+                    deps.chat_sessions.append(
+                        run_id, role="user", content=message, model=active_model
+                    )
+                    deps.chat_sessions.append(
+                        run_id,
+                        role="assistant",
+                        content=bundle.text,
+                        model=active_model,
+                        cost_usd=float(bundle.cost_usd or 0.0),
+                    )
+                except Exception:
+                    pass
 
             for chunk in _text_chunks(bundle.text):
                 yield _sse("delta", {"text": chunk})
@@ -2206,6 +2329,12 @@ def create_app(deps: DashboardDeps, *, bind_host: str = "127.0.0.1") -> FastAPI:
         _require_session(request)
         return HTMLResponse(_SPA_INDEX.read_text(encoding="utf-8"))
 
+    # Webhook routes — signature-verified, no session/CSRF (providers cannot
+    # send cookies). Loopback by default; needs ngrok or similar for production.
+    from midas.flagship.dashboard.webhooks import register_webhook_routes
+
+    register_webhook_routes(app, deps)
+
     return app
 
 
@@ -2599,6 +2728,47 @@ def _receipt(
         inputs=inputs,
         outputs=outputs,
         cost_usd=cost_usd,
+    )
+
+
+def _explain_chat_failure(exc: BaseException, active_model: str) -> str:
+    """Translate an LLM-call exception into one actionable sentence for the UI.
+
+    The chat error banner uses this. Goal: tell the operator what to fix next
+    instead of dropping a stack trace they cannot read.
+    """
+    text = f"{type(exc).__name__}: {exc}".lower()
+    model_hint = f" using {active_model}" if active_model else ""
+    if "all models failed" in text or "routererror" in text:
+        return (
+            f"The LLM cascade rejected every model{model_hint}. "
+            "Open /providers → Doctor to see which key/URL is missing."
+        )
+    if "401" in text or "unauthorized" in text or "invalid api key" in text:
+        return (
+            f"The provider refused the API key{model_hint}. "
+            "Re-connect this provider on /providers (key may have been rotated)."
+        )
+    if "403" in text or "forbidden" in text:
+        return (
+            f"The provider replied 403 forbidden{model_hint}. "
+            "Check that billing/scopes are active for this key."
+        )
+    if "404" in text:
+        return (
+            f"The endpoint returned 404{model_hint}. "
+            "Check the base URL ends in /v1 and the model id exists in /models."
+        )
+    if "connection" in text or "timeout" in text or "name or service" in text:
+        return (
+            "The endpoint was unreachable. "
+            "Check the URL on /providers and confirm the service is up."
+        )
+    if "budgetexceeded" in text:
+        return "Per-task or daily spend cap reached. Raise the cap in /settings or wait."
+    return (
+        f"The LLM call failed{model_hint}. "
+        "Open /providers → Doctor for a step-by-step diagnostic."
     )
 
 
